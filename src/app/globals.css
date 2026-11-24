@@ -1,0 +1,52 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f7f5ee;
+  --foreground: #18221b;
+  --sidebar-bg: #0b192c;
+  --primary-green: #1e6f43;
+  --primary-green-hover: #175835;
+  --primary-green-light: #e8f3ec;
+  --gold-accent: #c89d35;
+  --gold-light: #fef8eb;
+  --card-bg: #ffffff;
+  --card-border: #ebe6dc;
+  --muted-text: #5c665f;
+}
+
+[data-theme='dark'] {
+  --background: #0d141d;
+  --foreground: #f1f5f9;
+  --sidebar-bg: #070e17;
+  --primary-green: #228b53;
+  --primary-green-hover: #1e6f43;
+  --primary-green-light: #162e21;
+  --gold-accent: #d4af37;
+  --gold-light: #2b220d;
+  --card-bg: #131c27;
+  --card-border: #222f3e;
+  --muted-text: #94a3b8;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  min-height: 100vh;
+}
+
+/* Custom Scrollbar for Christian Ministry theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4cdbf;
+  border-radius: 9999px;
+}
+[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
