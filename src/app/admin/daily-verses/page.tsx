@@ -598,15 +598,6 @@ export default function SuperAdminDailyVersesPage() {
               >
                 <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
               </button>
-
-              <button
-                type="button"
-                onClick={() => setShowCreateModal(true)}
-                className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-2 shadow-md hover:shadow-lg transition-all"
-              >
-                <Plus size={16} />
-                <span>Create Daily Verse</span>
-              </button>
             </div>
           </div>
 
