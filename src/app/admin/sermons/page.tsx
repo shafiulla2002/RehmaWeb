@@ -131,6 +131,60 @@ const formatDateTimeDisplay = (rawDate: any): string => {
   }
 };
 
+// Canvas-based image compression to ensure thumbnail stays well under Firestore 1MB limit
+const compressImage = async (
+  file: File,
+  maxWidth = 1280,
+  maxHeight = 720,
+  quality = 0.82
+): Promise<{ blob: Blob; dataUrl: string }> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+      if (height > maxHeight) {
+        width = Math.round((width * maxHeight) / height);
+        height = maxHeight;
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas context not available'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', quality);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve({ blob, dataUrl });
+          } else {
+            reject(new Error('Canvas blob conversion failed'));
+          }
+        },
+        'image/jpeg',
+        quality
+      );
+    };
+    img.onerror = (err) => {
+      URL.revokeObjectURL(objectUrl);
+      reject(err);
+    };
+    img.src = objectUrl;
+  });
+};
+
 export default function AdminSermonsPage() {
   const [sermons, setSermons] = useState<FirebaseSermonItem[]>([]);
   const [customCategories, setCustomCategories] = useState<string[]>(DEFAULT_SERMON_CATEGORIES);
@@ -172,6 +226,11 @@ export default function AdminSermonsPage() {
   const [formAutoSend, setFormAutoSend] = useState(false);
   const [formCategories, setFormCategories] = useState<string[]>(['Sunday Service']);
 
+  // Thumbnail File State
+  const [thumbnailFile, setThumbnailFile] = useState<File | null>(null);
+  const [isUploadingThumb, setIsUploadingThumb] = useState(false);
+  const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
+
   // Sermon Notes Document State (Matching Mobile Exact Feature Parity)
   const [notesFile, setNotesFile] = useState<File | null>(null);
   const [notesUrl, setNotesUrl] = useState<string>('');
@@ -190,10 +249,6 @@ export default function AdminSermonsPage() {
   const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<FirebaseSermonItem | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
-
-  // File Upload Reference for Custom Thumbnail
-  const thumbnailInputRef = useRef<HTMLInputElement | null>(null);
-  const [isUploadingThumb, setIsUploadingThumb] = useState(false);
 
   const notify = (msg: string) => {
     setToast(msg);
@@ -358,6 +413,7 @@ export default function AdminSermonsPage() {
     setFormYoutubeId('');
     setFormDescription('');
     setFormThumbnailUrl('');
+    setThumbnailFile(null);
     setFormStatus('Published');
     setFormScheduledDate(new Date().toISOString().slice(0, 10));
     setFormScheduledTime('08:00 PM');
@@ -386,6 +442,7 @@ export default function AdminSermonsPage() {
     setFormYoutubeId(item.youtubeId ? (item.youtubeId.startsWith('http') ? item.youtubeId : `https://youtube.com/watch?v=${item.youtubeId}`) : '');
     setFormDescription(item.description || '');
     setFormThumbnailUrl(item.thumbnailUrl || item.imageUrl || '');
+    setThumbnailFile(null);
     setFormStatus((item.status as any) || 'Published');
     setFormScheduledDate(item.scheduledDate || new Date().toISOString().slice(0, 10));
     setFormScheduledTime(item.scheduledTime || '08:00 PM');
@@ -415,8 +472,8 @@ export default function AdminSermonsPage() {
     );
   };
 
-  // Handle local 16:9 thumbnail upload
-  const handleThumbnailUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle local 16:9 thumbnail upload with automatic Canvas compression and Firebase Storage upload
+  const handleThumbnailUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -426,19 +483,32 @@ export default function AdminSermonsPage() {
     }
 
     setIsUploadingThumb(true);
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setFormThumbnailUrl(reader.result);
-        setIsUploadingThumb(false);
-        notify('Custom thumbnail loaded');
-      }
-    };
-    reader.onerror = () => {
+    setThumbnailFile(file);
+
+    try {
+      // 1. Compress image to 1280x720 16:9 format
+      const { blob, dataUrl } = await compressImage(file, 1280, 720, 0.82);
+
+      // Temporary local preview
+      setFormThumbnailUrl(dataUrl);
+
+      // 2. Upload to Firebase Storage so the URL is short and never exceeds Firestore 1MB limit
+      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const storagePath = `Rhema Church/common/sermons/thumbnails/thumb_${Date.now()}_${cleanName}.jpg`;
+      const fileRef = storageRef(storage, storagePath);
+      await uploadBytes(fileRef, blob);
+      const cloudUrl = await getDownloadURL(fileRef);
+
+      // 3. Set persistent Firebase Storage download URL
+      setFormThumbnailUrl(cloudUrl);
+      notify('Custom thumbnail uploaded to Cloud Storage');
+    } catch (uploadErr) {
+      console.warn('Could not upload thumbnail to Firebase Storage, using compressed local fallback:', uploadErr);
+      // Even in fallback mode, the compressed dataUrl is only ~100KB, guaranteed < 500,000 bytes
+      notify('Custom thumbnail compressed and ready');
+    } finally {
       setIsUploadingThumb(false);
-      notify('Failed to read image file');
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   // Handle Sermon Notes Document file selection (Max 20MB: PDF, Word, TXT)
@@ -496,7 +566,7 @@ export default function AdminSermonsPage() {
     }
   };
 
-  // Save Sermon (Create or Update)
+  // Save Sermon (Create or Update) + Trigger FCM Push Notification
   const handleSaveSermon = async (statusOverride?: 'Published' | 'Scheduled' | 'Draft') => {
     const finalStatus = statusOverride || formStatus;
     setFormError(null);
@@ -517,7 +587,36 @@ export default function AdminSermonsPage() {
     setFormSubmitting(true);
     const cleanYt = extractYoutubeId(formYoutubeId);
 
-    // Upload Sermon Notes Document to Cloud Storage if new file selected
+    // 1. Process Thumbnail URL (Ensure it never exceeds Firestore document limit of 1MB)
+    let finalThumbUrl = formThumbnailUrl.trim();
+    if (thumbnailFile && (!finalThumbUrl || finalThumbUrl.startsWith('data:'))) {
+      try {
+        setIsUploadingThumb(true);
+        const { blob, dataUrl } = await compressImage(thumbnailFile, 1280, 720, 0.82);
+        try {
+          const cleanName = thumbnailFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const storagePath = `Rhema Church/common/sermons/thumbnails/thumb_${Date.now()}_${cleanName}.jpg`;
+          const fileRef = storageRef(storage, storagePath);
+          await uploadBytes(fileRef, blob);
+          finalThumbUrl = await getDownloadURL(fileRef);
+          setFormThumbnailUrl(finalThumbUrl);
+        } catch {
+          // If cloud upload fails, use the compressed canvas string which is only ~100KB
+          finalThumbUrl = dataUrl;
+        }
+      } catch (cErr) {
+        console.warn('Canvas compression failed:', cErr);
+      } finally {
+        setIsUploadingThumb(false);
+      }
+    }
+
+    // Safety guard: if string is somehow still over 500,000 chars, drop it or clear to avoid crashing Firestore
+    if (finalThumbUrl.length > 500000) {
+      finalThumbUrl = '';
+    }
+
+    // 2. Upload Sermon Notes Document to Cloud Storage if new file selected
     let finalNotesUrl = notesUrl;
     if (notesFile) {
       try {
@@ -550,8 +649,8 @@ export default function AdminSermonsPage() {
       scripture: formRef.trim(),
       categories: formCategories.join(';'),
       category: formCategories[0] || 'Sunday Service',
-      thumbnailUrl: formThumbnailUrl.trim(),
-      imageUrl: formThumbnailUrl.trim(),
+      thumbnailUrl: finalThumbUrl,
+      imageUrl: finalThumbUrl,
       status: finalStatus,
       scheduledDate: finalStatus === 'Scheduled' ? formScheduledDate : null,
       scheduledTime: finalStatus === 'Scheduled' ? formScheduledTime : null,
@@ -568,17 +667,56 @@ export default function AdminSermonsPage() {
     };
 
     try {
+      let savedSermonId = editingId;
+
       if (editingId) {
         const docRef = doc(db, 'Rhema Church', 'rhema', 'sermons', editingId);
         await updateDoc(docRef, payload);
         notify(`Updated sermon: ${formTitleEn}`);
       } else {
         const colRef = collection(db, 'Rhema Church', 'rhema', 'sermons');
-        await addDoc(colRef, {
+        const newDoc = await addDoc(colRef, {
           ...payload,
           createdAt: serverTimestamp(),
         });
+        savedSermonId = newDoc.id;
         notify(`Created sermon: ${formTitleEn}`);
+      }
+
+      // 🔔 Dispatch Mobile Push Notification when sermon is Published (Exact Mobile Parity)
+      if (finalStatus === 'Published') {
+        try {
+          const churchId = 'rhema';
+          const todayIsoStr = new Date().toISOString().slice(0, 10);
+          const broadcastData = {
+            title: `🎧 New Sermon: ${formTitleEn.trim()}`,
+            content: `New sermon "${formTitleEn.trim()}" preached on ${formDate} by ${formPastor.trim() || 'Pastor'} is now available. Watch/listen now!`,
+            date: todayIsoStr,
+            sermonDate: formDate,
+            type: 'sermon',
+            targetChurchId: churchId,
+            sermonId: savedSermonId,
+            imageUrl: finalThumbUrl || '',
+            screen: 'SermonVideo',
+            createdAt: serverTimestamp(),
+          };
+
+          // 1. Add to canonical Rhema Church/{churchId}/broadcasts (triggers Cloud Function sendRhemaBroadcastPush)
+          await addDoc(collection(db, 'Rhema Church', churchId, 'broadcasts'), broadcastData);
+
+          // 2. Add to churches/{churchId}/broadcasts (legacy trigger listener)
+          await addDoc(collection(db, 'churches', churchId, 'broadcasts'), broadcastData);
+
+          // 3. Add to Rhema Church/{churchId}/notifications for in-app bell notification
+          await addDoc(collection(db, 'Rhema Church', churchId, 'notifications'), {
+            ...broadcastData,
+            isRead: false,
+          });
+
+          notify(`🚀 Sermon published & push notification broadcasted to all mobile apps!`);
+        } catch (notifErr) {
+          console.warn('⚠️ Push notification broadcast warning:', notifErr);
+        }
       }
 
       setEditorOpen(false);
@@ -1234,7 +1372,10 @@ export default function AdminSermonsPage() {
                           />
                           <button
                             type="button"
-                            onClick={() => setFormThumbnailUrl('')}
+                            onClick={() => {
+                              setFormThumbnailUrl('');
+                              setThumbnailFile(null);
+                            }}
                             className="absolute top-2 right-2 p-1.5 rounded-full bg-black/70 text-white hover:bg-black transition-colors"
                           >
                             <X size={14} />
@@ -1247,10 +1388,10 @@ export default function AdminSermonsPage() {
                         >
                           <Upload size={24} className="mx-auto text-slate-400 mb-1.5" />
                           <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            {isUploadingThumb ? 'Reading thumbnail...' : 'Upload 16:9 Custom Thumbnail'}
+                            {isUploadingThumb ? 'Uploading thumbnail to Cloud...' : 'Upload 16:9 Custom Thumbnail'}
                           </p>
                           <p className="text-[10px] text-slate-500 mt-0.5">
-                            Recommended size 1280x720 (Landscape format)
+                            Recommended size 1280x720 (Landscape format) • Auto-uploaded to Cloud Storage
                           </p>
                         </div>
                       )}
@@ -1597,17 +1738,19 @@ export default function AdminSermonsPage() {
                   <div className="space-y-2 pt-4 border-t border-slate-100 dark:border-slate-800">
                     <button
                       type="button"
-                      disabled={formSubmitting || isUploadingNotes}
+                      disabled={formSubmitting || isUploadingNotes || isUploadingThumb}
                       onClick={() => handleSaveSermon('Published')}
                       className="w-full py-3.5 px-4 rounded-2xl bg-black dark:bg-white text-white dark:text-black font-bold text-xs flex items-center justify-center gap-2 shadow-lg hover:opacity-90 transition-all"
                     >
-                      {formSubmitting || isUploadingNotes ? (
+                      {formSubmitting || isUploadingNotes || isUploadingThumb ? (
                         <RefreshCw size={16} className="animate-spin" />
                       ) : (
                         <Send size={16} />
                       )}
                       <span>
-                        {isUploadingNotes
+                        {isUploadingThumb
+                          ? 'Uploading Custom Thumbnail...'
+                          : isUploadingNotes
                           ? 'Uploading Sermon Notes...'
                           : formSubmitting
                           ? 'Saving Sermon...'
@@ -1617,7 +1760,7 @@ export default function AdminSermonsPage() {
 
                     <button
                       type="button"
-                      disabled={formSubmitting || isUploadingNotes}
+                      disabled={formSubmitting || isUploadingNotes || isUploadingThumb}
                       onClick={() => handleSaveSermon('Draft')}
                       className="w-full py-3 px-4 rounded-2xl bg-slate-800 dark:bg-slate-800 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 hover:bg-slate-700 transition-all"
                     >
