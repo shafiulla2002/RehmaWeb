@@ -35,6 +35,7 @@ import {
   X,
   Building2,
   ShieldAlert,
+  CheckCircle2,
   Lock,
   ChevronLeft,
   ChevronRight,
@@ -548,15 +549,15 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
           </div>
         </header>
 
-        {/* Persistent Layer A Simulation Security Notice */}
-        <div className="bg-amber-50 dark:bg-amber-950/40 border-b border-amber-200/80 dark:border-amber-800/50 px-4 sm:px-6 py-2 text-[11px] text-amber-950 dark:text-amber-200 flex flex-wrap items-center justify-between gap-2">
+        {/* Live Firebase Cloud Architecture Context Bar */}
+        <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200/80 dark:border-emerald-800/50 px-4 sm:px-6 py-2 text-[11px] text-emerald-950 dark:text-emerald-200 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <ShieldAlert size={14} className="text-amber-600 dark:text-amber-400 shrink-0" />
+            <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>
-              <strong>Layer A Frontend Simulation Mode:</strong> All metrics, forms, and edits are stored locally in your browser. Zero Firebase writes, zero live member/financial reads, and zero backend mutations occur.
+              <strong>Firebase Live Production Mode:</strong> Connected directly to Firestore canonical church collections. Real-time synchronizations and administrator privileges active.
             </span>
           </div>
-          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-amber-200/60 dark:bg-amber-900/60 font-bold">
+          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-900/60 font-bold">
             Active Context: {activeBranch.city} · {profile?.fullName || 'Admin User'}
           </span>
         </div>
@@ -566,7 +567,7 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
 
         {/* Footer */}
         <footer className="border-t border-[#EBE6DC] dark:border-[#222F3E] px-4 sm:px-6 py-3 text-center text-[11px] text-[#5C665F] dark:text-slate-400">
-          Rhema Christian Ministry Administration Console &bull; Wave 7A (M27–M32) Frontend Simulation Mode
+          Rhema Christian Ministry Administration Console &bull; Live Connected Cloud Architecture
         </footer>
       </div>
     </div>
