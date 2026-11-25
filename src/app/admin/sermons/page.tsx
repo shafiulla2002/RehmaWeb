@@ -701,17 +701,8 @@ export default function AdminSermonsPage() {
             createdAt: serverTimestamp(),
           };
 
-          // 1. Add to canonical Rhema Church/{churchId}/broadcasts (triggers Cloud Function sendRhemaBroadcastPush)
+          // Dispatch single canonical broadcast to Rhema Church/{churchId}/broadcasts (Matching mobile app exactly)
           await addDoc(collection(db, 'Rhema Church', churchId, 'broadcasts'), broadcastData);
-
-          // 2. Add to churches/{churchId}/broadcasts (legacy trigger listener)
-          await addDoc(collection(db, 'churches', churchId, 'broadcasts'), broadcastData);
-
-          // 3. Add to Rhema Church/{churchId}/notifications for in-app bell notification
-          await addDoc(collection(db, 'Rhema Church', churchId, 'notifications'), {
-            ...broadcastData,
-            isRead: false,
-          });
 
           notify(`🚀 Sermon published & push notification broadcasted to all mobile apps!`);
         } catch (notifErr) {
