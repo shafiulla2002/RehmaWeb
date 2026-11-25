@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { AdminNavigationShell } from '@/components/layout/AdminNavigationShell';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import {
   collection,
   getDocs,
@@ -11,22 +11,17 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
-  setDoc,
   serverTimestamp,
-  query,
-  orderBy,
-  limit,
 } from 'firebase/firestore';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import {
   Video,
   Plus,
   Search,
   Edit2,
   Trash2,
-  Eye,
   FileText,
   CheckCircle2,
-  AlertTriangle,
   X,
   Calendar,
   Clock,
@@ -43,7 +38,6 @@ import {
   Check,
   Megaphone,
   Radio,
-  Layers,
 } from 'lucide-react';
 
 export interface FirebaseSermonItem {
@@ -69,6 +63,7 @@ export interface FirebaseSermonItem {
   notesFileName?: string;
   notesFileType?: string;
   notesFileSize?: number;
+  notesText?: string;
   scheduledDate?: string | null;
   scheduledTime?: string | null;
   scheduledPublishAt?: string | null;
@@ -98,14 +93,26 @@ const extractYoutubeId = (url: string) => {
   const match = cleanUrl.match(
     /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]+)/
   );
-  return match ? match[1] : cleanUrl;
+  if (match && match[1]) return match[1];
+  if (/^[a-zA-Z0-9_-]{11}$/.test(cleanUrl)) return cleanUrl;
+  return '';
 };
 
-const formatDateTimeDisplay = (val: any): string => {
-  if (!val) return '';
+const formatDateTimeDisplay = (rawDate: any): string => {
+  if (!rawDate) return 'Not published';
   try {
-    const d = typeof val === 'string' ? new Date(val) : val.toDate ? val.toDate() : new Date(val);
-    if (isNaN(d.getTime())) return String(val);
+    let d: Date;
+    if (typeof rawDate === 'string') {
+      d = new Date(rawDate);
+    } else if (rawDate?.seconds) {
+      d = new Date(rawDate.seconds * 1000);
+    } else if (rawDate instanceof Date) {
+      d = rawDate;
+    } else {
+      return 'Not published';
+    }
+
+    if (isNaN(d.getTime())) return 'Not published';
 
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -114,11 +121,13 @@ const formatDateTimeDisplay = (val: any): string => {
     let hours = d.getHours();
     const minutes = String(d.getMinutes()).padStart(2, '0');
     const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const hoursStr = String(hours).padStart(2, '0');
 
-    return `${day}-${month}-${year} at ${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
-  } catch (_) {
-    return '';
+    return `${day}-${month}-${year} at ${hoursStr}:${minutes} ${ampm}`;
+  } catch {
+    return 'Not published';
   }
 };
 
@@ -162,6 +171,16 @@ export default function AdminSermonsPage() {
   const [formNotifyMembers, setFormNotifyMembers] = useState(true);
   const [formAutoSend, setFormAutoSend] = useState(false);
   const [formCategories, setFormCategories] = useState<string[]>(['Sunday Service']);
+
+  // Sermon Notes Document State (Matching Mobile Exact Feature Parity)
+  const [notesFile, setNotesFile] = useState<File | null>(null);
+  const [notesUrl, setNotesUrl] = useState<string>('');
+  const [notesFileName, setNotesFileName] = useState<string>('');
+  const [notesFileType, setNotesFileType] = useState<string>(''); // 'pdf' | 'doc' | 'docx' | 'txt'
+  const [notesFileSize, setNotesFileSize] = useState<number | undefined>(undefined);
+  const [notesText, setNotesText] = useState<string>('');
+  const [isUploadingNotes, setIsUploadingNotes] = useState(false);
+  const notesFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Custom Category Creation Modal
   const [showNewCatModal, setShowNewCatModal] = useState(false);
@@ -230,6 +249,7 @@ export default function AdminSermonsPage() {
           notesFileName: d.notesFileName || '',
           notesFileType: d.notesFileType || '',
           notesFileSize: d.notesFileSize,
+          notesText: d.notesText || '',
           scheduledDate: d.scheduledDate,
           scheduledTime: d.scheduledTime,
           scheduledPublishAt: d.scheduledPublishAt,
@@ -344,6 +364,12 @@ export default function AdminSermonsPage() {
     setFormNotifyMembers(true);
     setFormAutoSend(false);
     setFormCategories(['Sunday Service']);
+    setNotesFile(null);
+    setNotesUrl('');
+    setNotesFileName('');
+    setNotesFileType('');
+    setNotesFileSize(undefined);
+    setNotesText('');
     setEditorOpen(true);
   };
 
@@ -370,6 +396,15 @@ export default function AdminSermonsPage() {
       ? item.categories.split(';').map((c) => c.trim()).filter(Boolean)
       : [item.category || 'Sunday Service'];
     setFormCategories(cats);
+
+    // Load Sermon Notes Document
+    setNotesFile(null);
+    setNotesUrl(item.notesUrl || '');
+    setNotesFileName(item.notesFileName || '');
+    setNotesFileType(item.notesFileType || '');
+    setNotesFileSize(item.notesFileSize);
+    setNotesText(item.notesText || '');
+
     setEditorOpen(true);
   };
 
@@ -406,6 +441,61 @@ export default function AdminSermonsPage() {
     reader.readAsDataURL(file);
   };
 
+  // Handle Sermon Notes Document file selection (Max 20MB: PDF, Word, TXT)
+  const handleNotesFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const name = file.name;
+    const ext = name.split('.').pop()?.toLowerCase() || '';
+
+    if (!['pdf', 'doc', 'docx', 'txt'].includes(ext)) {
+      setFormError('Please select a PDF (.pdf), Word document (.doc, .docx), or Text document (.txt).');
+      return;
+    }
+
+    // Max 20 MB = 20 * 1024 * 1024 bytes
+    const MAX_DOC_SIZE = 20 * 1024 * 1024;
+    if (file.size > MAX_DOC_SIZE) {
+      setFormError(`Document Limit Exceeded: The selected file is ${(file.size / (1024 * 1024)).toFixed(1)} MB. The maximum allowed file size is 20 MB.`);
+      return;
+    }
+
+    let fType = 'pdf';
+    if (ext === 'doc' || ext === 'docx') fType = ext;
+    else if (ext === 'txt') fType = 'txt';
+
+    setNotesFile(file);
+    setNotesFileName(name);
+    setNotesFileType(fType);
+    setNotesFileSize(file.size);
+    setFormError(null);
+
+    if (ext === 'txt') {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          setNotesText(reader.result);
+        }
+      };
+      reader.readAsText(file);
+    } else {
+      setNotesText('');
+    }
+  };
+
+  const handleRemoveNotes = () => {
+    setNotesFile(null);
+    setNotesUrl('');
+    setNotesFileName('');
+    setNotesFileType('');
+    setNotesFileSize(undefined);
+    setNotesText('');
+    if (notesFileInputRef.current) {
+      notesFileInputRef.current.value = '';
+    }
+  };
+
   // Save Sermon (Create or Update)
   const handleSaveSermon = async (statusOverride?: 'Published' | 'Scheduled' | 'Draft') => {
     const finalStatus = statusOverride || formStatus;
@@ -426,6 +516,25 @@ export default function AdminSermonsPage() {
 
     setFormSubmitting(true);
     const cleanYt = extractYoutubeId(formYoutubeId);
+
+    // Upload Sermon Notes Document to Cloud Storage if new file selected
+    let finalNotesUrl = notesUrl;
+    if (notesFile) {
+      try {
+        setIsUploadingNotes(true);
+        const cleanName = (notesFileName || notesFile.name).replace(/[^a-zA-Z0-9._-]/g, '_');
+        const storagePath = `Rhema Church/common/sermons/notes/${Date.now()}_${cleanName}`;
+        const fileRef = storageRef(storage, storagePath);
+        await uploadBytes(fileRef, notesFile);
+        finalNotesUrl = await getDownloadURL(fileRef);
+        setNotesUrl(finalNotesUrl);
+      } catch (notesErr) {
+        console.warn('Could not upload sermon notes document to Firebase Storage:', notesErr);
+        // Retain document metadata and proceed gracefully
+      } finally {
+        setIsUploadingNotes(false);
+      }
+    }
 
     const payload: any = {
       title: formTitleEn.trim(),
@@ -450,6 +559,11 @@ export default function AdminSermonsPage() {
       publishedAt: finalStatus === 'Published' ? new Date().toISOString() : null,
       notifyMembers: formNotifyMembers,
       autoSend: formAutoSend,
+      notesUrl: finalNotesUrl || '',
+      notesFileName: notesFileName || '',
+      notesFileType: notesFileType || '',
+      notesFileSize: notesFileSize || 0,
+      notesText: notesText || '',
       updatedAt: serverTimestamp(),
     };
 
@@ -560,20 +674,26 @@ export default function AdminSermonsPage() {
             </div>
           </div>
 
-          {/* 1. TOP SUMMARY CARDS (Matching Mobile Exact Cards) */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          {/* 1. TOP SUMMARY CARDS (Equal Width, Fill 100% Available Content Area) */}
+          <div
+            className={`grid gap-4 sm:gap-5 w-full ${
+              stats.scheduled > 0
+                ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'
+                : 'grid-cols-1 sm:grid-cols-3'
+            }`}
+          >
             {/* Card 1: PUBLISHED */}
             <div
-              onClick={() => setActiveFilter('Published')}
-              className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between ${
+              onClick={() => setActiveFilter(activeFilter === 'Published' ? 'All' : 'Published')}
+              className={`p-6 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-36 w-full ${
                 activeFilter === 'Published'
                   ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/20 ring-2 ring-emerald-500/20'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-400/50'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-emerald-400/50 hover:shadow-md'
               }`}
             >
-              <div className="w-8 h-1 rounded-full bg-emerald-500 mb-2" />
+              <div className="w-10 h-1.5 rounded-full bg-emerald-500" />
               <div>
-                <span className="text-3xl font-extrabold text-slate-900 dark:text-white block">
+                <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white block tracking-tight">
                   {stats.published}
                 </span>
                 <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mt-1 block">
@@ -585,16 +705,16 @@ export default function AdminSermonsPage() {
 
             {/* Card 2: DRAFTS */}
             <div
-              onClick={() => setActiveFilter('Drafts')}
-              className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between ${
+              onClick={() => setActiveFilter(activeFilter === 'Drafts' ? 'All' : 'Drafts')}
+              className={`p-6 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-36 w-full ${
                 activeFilter === 'Drafts'
                   ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/20 ring-2 ring-amber-500/20'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-amber-400/50'
+                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-amber-400/50 hover:shadow-md'
               }`}
             >
-              <div className="w-8 h-1 rounded-full bg-amber-500 mb-2" />
+              <div className="w-10 h-1.5 rounded-full bg-amber-500" />
               <div>
-                <span className="text-3xl font-extrabold text-slate-900 dark:text-white block">
+                <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white block tracking-tight">
                   {stats.drafts}
                 </span>
                 <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mt-1 block">
@@ -604,19 +724,19 @@ export default function AdminSermonsPage() {
               </div>
             </div>
 
-            {/* Card 3: SCHEDULED (if any) */}
+            {/* Card 3: SCHEDULED (if any scheduled) */}
             {stats.scheduled > 0 && (
               <div
-                onClick={() => setActiveFilter('Scheduled')}
-                className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between ${
+                onClick={() => setActiveFilter(activeFilter === 'Scheduled' ? 'All' : 'Scheduled')}
+                className={`p-6 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-36 w-full ${
                   activeFilter === 'Scheduled'
                     ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/20 ring-2 ring-purple-500/20'
-                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-purple-400/50'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-purple-400/50 hover:shadow-md'
                 }`}
               >
-                <div className="w-8 h-1 rounded-full bg-purple-500 mb-2" />
+                <div className="w-10 h-1.5 rounded-full bg-purple-500" />
                 <div>
-                  <span className="text-3xl font-extrabold text-slate-900 dark:text-white block">
+                  <span className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white block tracking-tight">
                     {stats.scheduled}
                   </span>
                   <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mt-1 block">
@@ -627,65 +747,71 @@ export default function AdminSermonsPage() {
               </div>
             )}
 
-            {/* Card 4: SERIES */}
+            {/* Card 4 (or 3): SERIES */}
             <div
               onClick={() => setActiveFilter('All')}
-              className="p-5 rounded-3xl border border-blue-200/80 dark:border-blue-900/40 bg-blue-50/40 dark:bg-blue-950/20 shadow-sm relative overflow-hidden flex flex-col justify-between cursor-pointer"
+              className="p-6 rounded-3xl border border-blue-200/80 dark:border-blue-900/40 bg-white dark:bg-slate-900 hover:border-blue-400/50 hover:shadow-md transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-36 w-full"
             >
-              <div className="w-8 h-1 rounded-full bg-blue-600 mb-2" />
+              <div className="w-10 h-1.5 rounded-full bg-blue-600" />
               <div>
-                <span className="text-3xl font-extrabold text-blue-600 dark:text-blue-400 block">
+                <span className="text-3xl sm:text-4xl font-extrabold text-blue-600 dark:text-blue-400 block tracking-tight">
                   {stats.seriesCount}
                 </span>
                 <div className="flex items-center gap-1.5 mt-1">
                   <span className="text-xs font-black uppercase tracking-wider text-blue-950 dark:text-blue-200">
                     SERIES
                   </span>
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
                 </div>
-                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-bold flex items-center gap-1">
-                  Active &bull;
+                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-bold">
+                  Active ✓
                 </span>
               </div>
             </div>
           </div>
 
-          {/* 2. CATEGORY FILTER CHIPS */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-1">
-            {categoryChips.map((cat) => {
-              const isSelected = activeFilter === cat;
-              const count =
-                cat === 'All'
-                  ? sermons.length
-                  : sermons.filter((s) => {
-                      const cArr = s.categories ? s.categories.split(';') : [s.category || ''];
-                      return cArr.some((c) => c.trim().toLowerCase() === cat.toLowerCase());
-                    }).length;
+          {/* 2. CATEGORY FILTER (Organized wrapped layout with real counts) */}
+          <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
+              <span>Filter by Series &amp; Category</span>
+              <span>{filteredSermons.length} sermons</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {categoryChips.map((cat) => {
+                const isSelected = activeFilter === cat;
+                const count =
+                  cat === 'All'
+                    ? sermons.length
+                    : sermons.filter((s) => {
+                        const cArr = s.categories ? s.categories.split(';') : [s.category || ''];
+                        return cArr.some((c) => c.trim().toLowerCase() === cat.toLowerCase());
+                      }).length;
 
-              return (
-                <button
-                  key={cat}
-                  type="button"
-                  onClick={() => setActiveFilter(cat)}
-                  className={`px-4 py-2 rounded-full text-xs font-semibold whitespace-nowrap transition-all border flex items-center gap-2 ${
-                    isSelected
-                      ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
-                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300'
-                  }`}
-                >
-                  <span>{cat}</span>
-                  <span
-                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setActiveFilter(cat)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border flex items-center gap-2 ${
                       isSelected
-                        ? 'bg-white/20 text-white dark:bg-slate-800 dark:text-slate-200'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                        ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
+                        : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300'
                     }`}
                   >
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
+                    <span>{cat}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                        isSelected
+                          ? 'bg-white/20 text-white dark:bg-slate-800 dark:text-slate-200'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* 3. SEARCH BAR */}
@@ -703,7 +829,7 @@ export default function AdminSermonsPage() {
             />
           </div>
 
-          {/* 4. SERMONS LISTING (Grouped by Category or Filter) */}
+          {/* 4. SERMONS LISTING (Responsive 2 or 3-column Grid Layout) */}
           {loading && sermons.length === 0 ? (
             <div className="p-16 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
               <RefreshCw size={24} className="animate-spin text-red-500" />
@@ -720,8 +846,7 @@ export default function AdminSermonsPage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-6">
-              {/* Grouping by Category when 'All' is selected, or direct card list */}
+            <div className="space-y-8">
               {allSeriesCategories
                 .filter((cat) => {
                   if (activeFilter === 'All') return true;
@@ -739,8 +864,8 @@ export default function AdminSermonsPage() {
                   if (catSermons.length === 0) return null;
 
                   return (
-                    <div key={categoryName} className="space-y-3">
-                      <div className="flex items-center gap-2">
+                    <div key={categoryName} className="space-y-4">
+                      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
                         <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
                           {categoryName}
                         </h3>
@@ -749,7 +874,8 @@ export default function AdminSermonsPage() {
                         </span>
                       </div>
 
-                      <div className="space-y-3">
+                      {/* Responsive 2 or 3 Column Sermon Grid */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                         {catSermons.map((sermon) => {
                           const cleanYt = extractYoutubeId(sermon.youtubeId || '');
                           const thumbUri =
@@ -766,98 +892,156 @@ export default function AdminSermonsPage() {
                           return (
                             <div
                               key={sermon.id}
-                              className="p-4 sm:p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:border-red-500/40 transition-all shadow-sm"
+                              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl overflow-hidden hover:border-red-500/40 hover:shadow-lg transition-all flex flex-col justify-between group"
                             >
-                              <div className="flex items-start gap-4 flex-1 min-w-0">
-                                {/* Thumbnail Frame with Play Button */}
-                                <div
-                                  onClick={() => {
-                                    if (cleanYt) {
-                                      setPreviewVideoUrl(
-                                        `https://www.youtube.com/embed/${cleanYt}?autoplay=1`
-                                      );
-                                    }
-                                  }}
-                                  className="w-24 h-16 sm:w-28 sm:h-20 rounded-2xl overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-800 shrink-0 relative cursor-pointer group"
-                                >
-                                  {thumbUri ? (
-                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                    <img
-                                      src={thumbUri}
-                                      alt={sermon.title}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-slate-600">
-                                      <Video size={24} />
-                                    </div>
-                                  )}
-                                  <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 flex items-center justify-center transition-colors">
-                                    <div className="w-7 h-7 rounded-full bg-white/90 text-black flex items-center justify-center shadow-lg">
-                                      <Play size={12} className="ml-0.5 fill-black" />
-                                    </div>
+                              {/* 16:9 Thumbnail Header with Play Button & Badges */}
+                              <div
+                                onClick={() => {
+                                  if (cleanYt) {
+                                    setPreviewVideoUrl(
+                                      `https://www.youtube.com/embed/${cleanYt}?autoplay=1`
+                                    );
+                                  }
+                                }}
+                                className="relative aspect-video w-full bg-slate-950 overflow-hidden cursor-pointer"
+                              >
+                                {thumbUri ? (
+                                  /* eslint-disable-next-line @next/next/no-img-element */
+                                  <img
+                                    src={thumbUri}
+                                    alt={sermon.title}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-slate-600">
+                                    <Video size={36} />
+                                  </div>
+                                )}
+
+                                {/* Play button overlay */}
+                                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 flex items-center justify-center transition-colors">
+                                  <div className="w-10 h-10 rounded-full bg-white/95 text-black flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform">
+                                    <Play size={16} className="ml-0.5 fill-black" />
                                   </div>
                                 </div>
 
-                                {/* Sermon Metadata */}
-                                <div className="space-y-1 flex-1 min-w-0">
-                                  <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                {/* Duration Badge in bottom-right */}
+                                {sermon.duration && (
+                                  <div className="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded-lg bg-black/80 backdrop-blur-sm text-white text-[10px] font-bold flex items-center gap-1 shadow">
+                                    <Clock size={10} />
+                                    <span>{sermon.duration}</span>
+                                  </div>
+                                )}
+
+                                {/* Status Badge top-left */}
+                                <div className="absolute top-2.5 left-2.5">
+                                  <span
+                                    className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider backdrop-blur-md shadow-sm ${
+                                      sermon.status === 'Published'
+                                        ? 'bg-emerald-500/90 text-white'
+                                        : sermon.status === 'Scheduled'
+                                        ? 'bg-purple-500/90 text-white'
+                                        : 'bg-amber-500/90 text-white'
+                                    }`}
+                                  >
+                                    {sermon.status}
+                                  </span>
+                                </div>
+
+                                {/* Notes Indicator Badge top-right */}
+                                {(sermon.notesUrl || sermon.notesFileName) && (
+                                  <div className="absolute top-2.5 right-2.5 px-2 py-0.5 rounded-lg bg-purple-600/90 text-white text-[10px] font-bold flex items-center gap-1 backdrop-blur-sm shadow">
+                                    <Paperclip size={10} />
+                                    <span>NOTES</span>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Sermon Details */}
+                              <div className="p-4 sm:p-5 flex-1 flex flex-col justify-between space-y-3">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-[10px] font-bold uppercase tracking-wider">
+                                      {sermon.category || 'Sunday Service'}
+                                    </span>
+                                    {sermon.scripture && (
+                                      <span className="text-[11px] text-slate-500 font-medium truncate max-w-[160px]">
+                                        📖 {sermon.scripture}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* English Title */}
+                                  <h4 className="text-base font-bold text-slate-900 dark:text-white line-clamp-1 leading-snug">
                                     {sermon.titleEn || sermon.title}
                                   </h4>
 
+                                  {/* Telugu Title */}
                                   {(sermon.titleTelugu || sermon.titleTe) && (
-                                    <p className="text-xs text-amber-700 dark:text-amber-400 font-serif font-medium truncate">
+                                    <p className="text-xs text-amber-700 dark:text-amber-400 font-serif font-medium line-clamp-1">
                                       {sermon.titleTelugu || sermon.titleTe}
                                     </p>
                                   )}
 
-                                  <div className="text-[11px] text-slate-600 dark:text-slate-400 flex flex-wrap items-center gap-1.5 pt-0.5">
+                                  {/* Preacher & Service Date */}
+                                  <div className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-1.5 pt-0.5">
                                     <span className="font-semibold text-slate-900 dark:text-white">
                                       {sermon.pastor}
                                     </span>
-                                    <span>&bull;</span>
+                                    <span>•</span>
                                     <span>{sermon.date}</span>
-                                    <span>&bull;</span>
-                                    <span>{sermon.duration}</span>
                                   </div>
 
-                                  {publishedDateText && (
-                                    <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1 pt-0.5">
-                                      <span>📢 Published: {publishedDateText}</span>
-                                    </div>
+                                  {/* Published Timestamp */}
+                                  <p className="text-[11px] text-slate-400 flex items-center gap-1.5 pt-0.5">
+                                    <Megaphone size={12} className="text-red-500 shrink-0" />
+                                    <span>Published: {publishedDateText}</span>
+                                  </p>
+
+                                  {/* Attached Sermon Notes Document Link if present */}
+                                  {(sermon.notesUrl || sermon.notesFileName) && (
+                                    <a
+                                      href={sermon.notesUrl || '#'}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-purple-600 dark:text-purple-400 hover:underline pt-1"
+                                      onClick={(e) => {
+                                        if (!sermon.notesUrl) e.preventDefault();
+                                      }}
+                                    >
+                                      <FileText size={12} />
+                                      <span className="truncate max-w-[200px]">
+                                        {sermon.notesFileName || 'Sermon Notes Document'}
+                                      </span>
+                                      <ExternalLink size={10} />
+                                    </a>
                                   )}
-
-                                  <div className="pt-1.5">
-                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                                      {categoryName}
-                                    </span>
-                                  </div>
                                 </div>
-                              </div>
 
-                              {/* Actions: Edit & Delete Divider Row matching mobile */}
-                              <div className="flex sm:flex-col items-center justify-end gap-3 sm:gap-2 sm:pl-4 sm:border-l border-slate-200 dark:border-slate-800 w-full sm:w-auto shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditModal(sermon)}
-                                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1 py-1.5 px-3 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold"
-                                >
-                                  <Edit2 size={14} />
-                                  <span className="text-[10px] uppercase font-black tracking-wider">
-                                    EDIT
-                                  </span>
-                                </button>
+                                {/* Action Buttons: EDIT & DEL */}
+                                <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditModal(sermon)}
+                                    className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                                  >
+                                    <Edit2 size={13} />
+                                    <span className="text-[11px] uppercase font-bold tracking-wider">
+                                      EDIT
+                                    </span>
+                                  </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteTarget(sermon)}
-                                  className="flex-1 sm:flex-initial flex items-center justify-center gap-1 py-1.5 px-3 rounded-xl hover:bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-bold"
-                                >
-                                  <Trash2 size={14} />
-                                  <span className="text-[10px] uppercase font-black tracking-wider">
-                                    DEL
-                                  </span>
-                                </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteTarget(sermon)}
+                                    className="px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 font-bold text-xs flex items-center gap-1.5 transition-colors"
+                                  >
+                                    <Trash2 size={13} />
+                                    <span className="text-[11px] uppercase font-bold tracking-wider">
+                                      DEL
+                                    </span>
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           );
@@ -1033,59 +1217,55 @@ export default function AdminSermonsPage() {
                     </div>
                   </div>
 
-                  {/* Thumbnail Image */}
+                  {/* 16:9 Thumbnail Custom Upload */}
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                       CUSTOM THUMBNAIL (16:9 FORMAT)
                     </label>
 
-                    <input
-                      ref={thumbnailInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleThumbnailUpload}
-                      className="hidden"
-                    />
-
-                    {formThumbnailUrl ? (
-                      <div className="flex items-center gap-4 p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={formThumbnailUrl}
-                          alt="Thumbnail preview"
-                          className="w-24 h-14 rounded-xl object-cover border border-slate-200 dark:border-slate-800"
-                        />
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => thumbnailInputRef.current?.click()}
-                            className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
-                          >
-                            Replace
-                          </button>
+                    <div className="space-y-3">
+                      {formThumbnailUrl ? (
+                        <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 max-w-sm">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={formThumbnailUrl}
+                            alt="Thumbnail preview"
+                            className="w-full h-full object-cover"
+                          />
                           <button
                             type="button"
                             onClick={() => setFormThumbnailUrl('')}
-                            className="px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-500/10 text-xs font-semibold"
+                            className="absolute top-2 right-2 p-1.5 rounded-full bg-black/70 text-white hover:bg-black transition-colors"
                           >
-                            Remove
+                            <X size={14} />
                           </button>
                         </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => thumbnailInputRef.current?.click()}
-                        disabled={isUploadingThumb}
-                        className="w-full py-4 border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-red-500 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:text-red-500 transition-colors"
-                      >
-                        <Upload size={16} />
-                        <span>Upload 16:9 Custom Thumbnail</span>
-                      </button>
-                    )}
+                      ) : (
+                        <div
+                          onClick={() => thumbnailInputRef.current?.click()}
+                          className="border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-red-500/50 rounded-2xl p-6 text-center cursor-pointer transition-colors bg-slate-50 dark:bg-slate-950/40"
+                        >
+                          <Upload size={24} className="mx-auto text-slate-400 mb-1.5" />
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                            {isUploadingThumb ? 'Reading thumbnail...' : 'Upload 16:9 Custom Thumbnail'}
+                          </p>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            Recommended size 1280x720 (Landscape format)
+                          </p>
+                        </div>
+                      )}
+
+                      <input
+                        ref={thumbnailInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleThumbnailUpload}
+                      />
+                    </div>
                   </div>
 
-                  {/* Scripture & Description */}
+                  {/* Scripture Reference */}
                   <div>
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
                       SCRIPTURE REFERENCE
@@ -1099,142 +1279,345 @@ export default function AdminSermonsPage() {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                      SERMON DESCRIPTION / SUMMARY
-                    </label>
-                    <textarea
-                      rows={3}
-                      value={formDescription}
-                      onChange={(e) => setFormDescription(e.target.value)}
-                      placeholder="Devotional message key takeaways and pastoral notes..."
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium"
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  {/* SERMON NOTES DOCUMENT (OPTIONAL) - Exact Mobile Parity */}
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1.5 rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
+                          <BookOpen size={16} />
+                        </span>
+                        <h3 className="text-xs font-black uppercase tracking-wider text-purple-950 dark:text-purple-300">
+                          SERMON NOTES DOCUMENT
+                        </h3>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px] font-bold uppercase tracking-wider">
+                        OPTIONAL
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Attach sermon notes or study outline in PDF, Word, or Text format (Max 20 MB). Members can read these notes directly inside the app while watching.
+                    </p>
+
+                    {/* Supported Format Pills */}
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400">
+                        PDF <span className="font-normal opacity-80">.pdf</span>
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black border border-blue-200 dark:border-blue-900/50 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400">
+                        Word <span className="font-normal opacity-80">.doc, .docx</span>
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black border border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400">
+                        Text <span className="font-normal opacity-80">.txt</span>
+                      </span>
+                    </div>
+
+                    {/* Selected Document or Upload Area */}
+                    {notesFileName || notesUrl || notesFile ? (
+                      <div className="p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 space-y-3">
+                        <div className="flex items-center gap-3">
+                          {/* File Type Badge */}
+                          <div
+                            className={`w-11 h-11 rounded-xl flex items-center justify-center font-black text-xs border ${
+                              notesFileType === 'pdf'
+                                ? 'bg-red-100 dark:bg-red-950/40 border-red-300 dark:border-red-800 text-red-600'
+                                : notesFileType === 'doc' || notesFileType === 'docx'
+                                ? 'bg-blue-100 dark:bg-blue-950/40 border-blue-300 dark:border-blue-800 text-blue-600'
+                                : 'bg-emerald-100 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-600'
+                            }`}
+                          >
+                            {(notesFileType || 'DOC').toUpperCase()}
+                          </div>
+
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                              {notesFileName || 'Sermon_Notes_Document'}
+                            </p>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                              {notesFileSize ? (
+                                <span>{(notesFileSize / 1024).toFixed(0)} KB • </span>
+                              ) : null}
+                              <span className="text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
+                                <CheckCircle2 size={11} />
+                                {notesFile ? 'Ready to upload on save' : 'Uploaded to Cloud Storage'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Text file content snippet preview if text format */}
+                        {notesText ? (
+                          <div className="p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-600 dark:text-slate-300">
+                            <span className="font-bold text-[10px] uppercase text-slate-400 block mb-1">
+                              Text Content Preview:
+                            </span>
+                            <p className="line-clamp-2 italic font-mono">
+                              {notesText}
+                            </p>
+                          </div>
+                        ) : null}
+
+                        {/* Replace / Remove Document Actions */}
+                        <div className="pt-2 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between">
+                          <button
+                            type="button"
+                            onClick={() => notesFileInputRef.current?.click()}
+                            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1.5"
+                          >
+                            <Paperclip size={13} />
+                            <span>Replace Document</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleRemoveNotes}
+                            className="text-xs font-bold text-red-600 dark:text-red-400 hover:underline flex items-center gap-1.5"
+                          >
+                            <Trash2 size={13} />
+                            <span>Remove</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => notesFileInputRef.current?.click()}
+                        className="border-2 border-dashed border-slate-200 dark:border-slate-800 hover:border-purple-500/50 rounded-2xl p-6 text-center cursor-pointer transition-colors bg-slate-50/70 dark:bg-slate-950/40 flex flex-col items-center justify-center space-y-2"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-300 flex items-center justify-center">
+                          <Upload size={18} />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold text-slate-900 dark:text-white">
+                            Choose Sermon Notes Document
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Tap to select PDF, Word (.doc, .docx), or Text (.txt) file • Up to 20 MB
+                          </p>
+                        </div>
+                        <div className="pt-1">
+                          <span className="px-3.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-bold shadow-sm inline-flex items-center gap-1.5">
+                            <Paperclip size={13} />
+                            <span>Browse Files (Max 20 MB)</span>
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <input
+                      ref={notesFileInputRef}
+                      type="file"
+                      accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                      className="hidden"
+                      onChange={handleNotesFileSelect}
                     />
                   </div>
 
-                  {/* Publication Status Selector */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-2">
-                      PUBLISH STATUS
-                    </label>
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  {/* PUBLISH STATUS - Exact Mobile Parity (3 Radio Cards) */}
+                  {/* ───────────────────────────────────────────────────────────── */}
+                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                        <Radio size={16} />
+                      </span>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                        PUBLISH STATUS
+                      </h3>
+                    </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="space-y-2.5">
                       {/* Option 1: Publish Now */}
                       <div
                         onClick={() => setFormStatus('Published')}
-                        className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                        className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
                           formStatus === 'Published'
-                            ? 'border-emerald-500 bg-emerald-50/70 dark:bg-emerald-950/20'
-                            : 'border-slate-200 dark:border-slate-800'
+                            ? 'border-emerald-500 bg-emerald-50/60 dark:bg-emerald-950/20 ring-1 ring-emerald-500/30'
+                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
                         }`}
                       >
-                        <div>
-                          <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                            Publish Now
-                          </span>
-                          <span className="text-[10px] text-slate-400">Live immediately</span>
-                        </div>
-                        {formStatus === 'Published' && (
-                          <div className="w-4 h-4 rounded-full bg-emerald-500 text-white flex items-center justify-center">
-                            <Check size={10} strokeWidth={3} />
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                              formStatus === 'Published'
+                                ? 'bg-emerald-500 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                            }`}
+                          >
+                            <Send size={16} />
                           </div>
-                        )}
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                              Publish Now
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Live immediately on Member Sermons View
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
+                            formStatus === 'Published'
+                              ? 'bg-emerald-500 border-emerald-500 text-white'
+                              : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900'
+                          }`}
+                        >
+                          {formStatus === 'Published' && <Check size={12} strokeWidth={3} />}
+                        </div>
                       </div>
 
                       {/* Option 2: Scheduled */}
                       <div
                         onClick={() => setFormStatus('Scheduled')}
-                        className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                        className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
                           formStatus === 'Scheduled'
-                            ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/20'
-                            : 'border-slate-200 dark:border-slate-800'
+                            ? 'border-purple-500 bg-purple-50/60 dark:bg-purple-950/20 ring-1 ring-purple-500/30'
+                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
                         }`}
                       >
-                        <div>
-                          <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                            Scheduled
-                          </span>
-                          <span className="text-[10px] text-slate-400">Auto-publish later</span>
-                        </div>
-                        {formStatus === 'Scheduled' && (
-                          <div className="w-4 h-4 rounded-full bg-purple-500 text-white flex items-center justify-center">
-                            <Check size={10} strokeWidth={3} />
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                              formStatus === 'Scheduled'
+                                ? 'bg-purple-500 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                            }`}
+                          >
+                            <Clock size={16} />
                           </div>
-                        )}
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                              Scheduled
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Auto-publishes on {formScheduledDate} at {formScheduledTime}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
+                            formStatus === 'Scheduled'
+                              ? 'bg-purple-500 border-purple-500 text-white'
+                              : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900'
+                          }`}
+                        >
+                          {formStatus === 'Scheduled' && <Check size={12} strokeWidth={3} />}
+                        </div>
                       </div>
+
+                      {/* Scheduled Date/Time Inputs if Scheduled is selected */}
+                      {formStatus === 'Scheduled' && (
+                        <div className="p-3.5 bg-purple-50/50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/50 rounded-2xl grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in">
+                          <div>
+                            <label className="block text-[10px] font-bold text-purple-950 dark:text-purple-200 uppercase mb-1">
+                              Scheduled Date
+                            </label>
+                            <input
+                              type="date"
+                              value={formScheduledDate}
+                              onChange={(e) => setFormScheduledDate(e.target.value)}
+                              className="w-full bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-purple-950 dark:text-purple-200 uppercase mb-1">
+                              Scheduled Time
+                            </label>
+                            <input
+                              type="text"
+                              value={formScheduledTime}
+                              onChange={(e) => setFormScheduledTime(e.target.value)}
+                              placeholder="08:00 PM"
+                              className="w-full bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white"
+                            />
+                          </div>
+                        </div>
+                      )}
 
                       {/* Option 3: Save as Draft */}
                       <div
                         onClick={() => setFormStatus('Draft')}
-                        className={`p-3 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
+                        className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-center justify-between ${
                           formStatus === 'Draft'
-                            ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/20'
-                            : 'border-slate-200 dark:border-slate-800'
+                            ? 'border-amber-500 bg-amber-50/60 dark:bg-amber-950/20 ring-1 ring-amber-500/30'
+                            : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
                         }`}
                       >
-                        <div>
-                          <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                            Save as Draft
-                          </span>
-                          <span className="text-[10px] text-slate-400">Private draft</span>
-                        </div>
-                        {formStatus === 'Draft' && (
-                          <div className="w-4 h-4 rounded-full bg-amber-500 text-white flex items-center justify-center">
-                            <Check size={10} strokeWidth={3} />
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`w-9 h-9 rounded-xl flex items-center justify-center ${
+                              formStatus === 'Draft'
+                                ? 'bg-amber-500 text-white'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+                            }`}
+                          >
+                            <FileText size={16} />
                           </div>
-                        )}
+                          <div>
+                            <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                              Save as Draft
+                            </span>
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              Saved privately, hidden from members
+                            </span>
+                          </div>
+                        </div>
+
+                        <div
+                          className={`w-5 h-5 rounded-full flex items-center justify-center border transition-all ${
+                            formStatus === 'Draft'
+                              ? 'bg-amber-500 border-amber-500 text-white'
+                              : 'border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900'
+                          }`}
+                        >
+                          {formStatus === 'Draft' && <Check size={12} strokeWidth={3} />}
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Scheduled Date/Time Inputs if Scheduled is active */}
-                  {formStatus === 'Scheduled' && (
-                    <div className="p-3 bg-purple-50/40 dark:bg-purple-950/20 border border-purple-200/80 dark:border-purple-800/40 rounded-2xl grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-[10px] font-bold text-purple-950 dark:text-purple-200 uppercase mb-1">
-                          Scheduled Date
-                        </label>
-                        <input
-                          type="date"
-                          value={formScheduledDate}
-                          onChange={(e) => setFormScheduledDate(e.target.value)}
-                          className="w-full bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-800 rounded-xl px-2.5 py-1.5 text-xs"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold text-purple-950 dark:text-purple-200 uppercase mb-1">
-                          Scheduled Time
-                        </label>
-                        <input
-                          type="text"
-                          value={formScheduledTime}
-                          onChange={(e) => setFormScheduledTime(e.target.value)}
-                          placeholder="08:00 PM"
-                          className="w-full bg-white dark:bg-slate-900 border border-purple-300 dark:border-purple-800 rounded-xl px-2.5 py-1.5 text-xs"
-                        />
-                      </div>
-                    </div>
-                  )}
+                  {/* Sermon Description / Pastoral Notes */}
+                  <div>
+                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                      SERMON DESCRIPTION / PASTORAL NOTES
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={formDescription}
+                      onChange={(e) => setFormDescription(e.target.value)}
+                      placeholder="Provide sermon context, points, or pastoral remarks..."
+                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs text-slate-900 dark:text-white font-medium"
+                    />
+                  </div>
 
                   {/* Action Buttons matching Mobile */}
-                  <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  <div className="space-y-2 pt-4 border-t border-slate-100 dark:border-slate-800">
                     <button
                       type="button"
-                      disabled={formSubmitting}
+                      disabled={formSubmitting || isUploadingNotes}
                       onClick={() => handleSaveSermon('Published')}
                       className="w-full py-3.5 px-4 rounded-2xl bg-black dark:bg-white text-white dark:text-black font-bold text-xs flex items-center justify-center gap-2 shadow-lg hover:opacity-90 transition-all"
                     >
-                      {formSubmitting ? (
+                      {formSubmitting || isUploadingNotes ? (
                         <RefreshCw size={16} className="animate-spin" />
                       ) : (
                         <Send size={16} />
                       )}
-                      <span>🚀 Save &amp; Publish Now</span>
+                      <span>
+                        {isUploadingNotes
+                          ? 'Uploading Sermon Notes...'
+                          : formSubmitting
+                          ? 'Saving Sermon...'
+                          : '🚀 Save & Publish Now'}
+                      </span>
                     </button>
 
                     <button
                       type="button"
-                      disabled={formSubmitting}
+                      disabled={formSubmitting || isUploadingNotes}
                       onClick={() => handleSaveSermon('Draft')}
                       className="w-full py-3 px-4 rounded-2xl bg-slate-800 dark:bg-slate-800 text-slate-200 font-bold text-xs flex items-center justify-center gap-2 hover:bg-slate-700 transition-all"
                     >
@@ -1248,7 +1631,7 @@ export default function AdminSermonsPage() {
                         onClick={() => setEditorOpen(false)}
                         className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 font-semibold"
                       >
-                        &larr; Back to list
+                        ← Back to list
                       </button>
                     </div>
                   </div>
@@ -1260,38 +1643,44 @@ export default function AdminSermonsPage() {
           {/* NEW CATEGORY / SERIES MODAL */}
           {showNewCatModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl relative">
-                <div className="flex items-center gap-2">
-                  <FolderPlus size={20} className="text-red-500" />
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    New Sermon Series
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Add New Sermon Series
                   </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCatModal(false)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
 
                 <p className="text-xs text-slate-500">
-                  Enter a name for the new sermon category or series.
+                  Enter the name of the new sermon series or service category to add to the church catalog:
                 </p>
 
                 <input
                   type="text"
-                  placeholder="e.g. Healing Revival, Faith Unshakable..."
                   value={newCatInput}
                   onChange={(e) => setNewCatInput(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs"
+                  placeholder="e.g. Kingdom Foundations"
+                  className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-900 dark:text-white font-medium"
                 />
 
-                <div className="flex gap-2 pt-2">
+                <div className="flex items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
                     onClick={() => setShowNewCatModal(false)}
-                    className="flex-1 py-2 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold"
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-700"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
                     onClick={handleAddNewCategory}
-                    className="flex-1 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold"
+                    className="px-4 py-1.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 shadow-sm"
                   >
                     Add Series
                   </button>
@@ -1300,50 +1689,36 @@ export default function AdminSermonsPage() {
             </div>
           )}
 
-          {/* VIDEO PREVIEW MODAL */}
-          {previewVideoUrl && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-              <div className="bg-slate-950 border border-slate-800 rounded-3xl max-w-2xl w-full p-4 space-y-3 relative shadow-2xl">
-                <button
-                  type="button"
-                  onClick={() => setPreviewVideoUrl(null)}
-                  className="absolute top-4 right-4 p-1.5 rounded-full bg-white/20 text-white hover:bg-white/30"
-                >
-                  <X size={18} />
-                </button>
-                <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black">
-                  <iframe
-                    src={previewVideoUrl}
-                    title="Sermon Video Preview"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen
-                    className="w-full h-full border-0"
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* DELETE CONFIRMATION MODAL */}
           {deleteTarget && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-                <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto">
-                  <Trash2 size={24} />
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+                  <div className="p-2 rounded-xl bg-red-100 dark:bg-red-950/50">
+                    <Trash2 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Delete Sermon?
+                    </h3>
+                    <p className="text-[11px] text-slate-500">Permanent Firestore removal</p>
+                  </div>
                 </div>
-                <div className="text-center space-y-1">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Delete Sermon?
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Are you sure you want to delete &ldquo;{deleteTarget.title}&rdquo;? This will remove the sermon from the church repository.
-                  </p>
-                </div>
-                <div className="flex gap-2 pt-2">
+
+                <p className="text-xs text-slate-600 dark:text-slate-300">
+                  Are you sure you want to delete{' '}
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    &quot;{deleteTarget.titleEn || deleteTarget.title}&quot;
+                  </span>
+                  ? This action cannot be undone.
+                </p>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
+                    disabled={deleteSubmitting}
                     onClick={() => setDeleteTarget(null)}
-                    className="flex-1 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-semibold"
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-700"
                   >
                     Cancel
                   </button>
@@ -1351,11 +1726,34 @@ export default function AdminSermonsPage() {
                     type="button"
                     disabled={deleteSubmitting}
                     onClick={handleDeleteSermon}
-                    className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold"
+                    className="px-4 py-1.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 shadow-sm flex items-center gap-1.5"
                   >
-                    {deleteSubmitting ? 'Deleting...' : 'Confirm Delete'}
+                    {deleteSubmitting ? <RefreshCw size={14} className="animate-spin" /> : null}
+                    <span>Delete Permanently</span>
                   </button>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIDEO PREVIEW MODAL */}
+          {previewVideoUrl && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in">
+              <div className="relative w-full max-w-3xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPreviewVideoUrl(null)}
+                  className="absolute top-3 right-3 z-10 p-2 rounded-full bg-black/70 text-white hover:bg-black transition-colors"
+                >
+                  <X size={18} />
+                </button>
+                <iframe
+                  src={previewVideoUrl}
+                  title="Sermon Video Player"
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
               </div>
             </div>
           )}
