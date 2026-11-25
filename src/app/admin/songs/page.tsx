@@ -11,8 +11,6 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
-  setDoc,
-  getDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import {
@@ -30,20 +28,12 @@ import {
   ExternalLink,
   BookOpen,
   Star,
-  Layers,
-  Calendar,
-  Clock,
-  ArrowUp,
-  ArrowDown,
-  ChevronRight,
-  List,
-  Sparkles,
   Sliders,
   Check,
   Play,
   Mic,
-  FolderPlus,
-  Radio,
+  Users,
+  ChevronDown,
 } from 'lucide-react';
 
 const CHROMATIC_KEYS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -70,6 +60,13 @@ const CANONICAL_SONG_CATEGORIES = [
   'Other',
 ];
 
+const TEMPO_SUGGESTIONS = [
+  { val: '72', label: 'Slow (72 BPM)' },
+  { val: '96', label: 'Mid (96 BPM)' },
+  { val: '124', label: 'Fast (124 BPM)' },
+  { val: '138', label: 'Upbeat (138 BPM)' },
+];
+
 const PRELUDE_SUGGESTIONS = [
   'Acoustic + Drum',
   'Keys',
@@ -86,10 +83,22 @@ const INTERLUDE_SUGGESTIONS = [
   'Keys + Elec (Alt)',
   'Keys/ Elec Alt',
   'Elec + Keys (Alt)',
+  '(Elec + Keys)',
   'Acoustic Solo',
   'Elec Lead',
   'Full Band Dynamics',
   'None',
+];
+
+const NOTES_SUGGESTIONS = [
+  "Celebrate God's power, strength, and salvation",
+  'Prep for 2nd Coming',
+  'God just wants our heart',
+  'You washed us clean with your Blood',
+  'Call to Worship & Praise',
+  'Intimate Surrender & Holy Spirit',
+  'Maintain purity and be Holy',
+  'Giving our best to God (Offertory)',
 ];
 
 const normalizeRoot = (note: string): string => {
@@ -173,26 +182,10 @@ interface FirebaseSongItem {
   updatedAt?: any;
 }
 
-interface SetlistSongItem {
-  id: string;
-  title: string;
-  titleTe?: string;
-  key: string;
-  tempo?: string | number;
-  timeSignature?: string;
-  ledBy?: string;
-  prelude?: string;
-  interlude?: string;
-  notes?: string;
-  verses?: string;
-}
-
-interface WorshipService {
+interface ChurchMemberItem {
   id: string;
   name: string;
-  date?: string;
-  time?: string;
-  songs: SetlistSongItem[];
+  phone?: string;
 }
 
 export default function AdminSongsPage() {
@@ -200,29 +193,19 @@ export default function AdminSongsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Tabs: 'all' | 'theme' | 'setlists'
-  const [activeTab, setActiveTab] = useState<'all' | 'theme' | 'setlists'>('all');
+  // Tabs: ONLY 'all' | 'theme' matching mobile application
+  const [activeTab, setActiveTab] = useState<'all' | 'theme'>('all');
 
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<string>('All');
-  const [keyFilter, setKeyFilter] = useState<string>('All');
+  const [categoryFilter, setCategoryFilter] = useState('All');
+  const [keyFilter, setKeyFilter] = useState('All');
   const [toast, setToast] = useState<string | null>(null);
 
-  // Setlists State
-  const [services, setServices] = useState<WorshipService[]>([]);
-  const [activeServiceId, setActiveServiceId] = useState<string>('service_1');
-  const [showAddServiceModal, setShowAddServiceModal] = useState(false);
-  const [newServiceName, setNewServiceName] = useState('');
-  const [newServiceTime, setNewServiceTime] = useState('08:30 AM');
-  const [newServiceDate, setNewServiceDate] = useState(() => new Date().toISOString().slice(0, 10));
-
-  // Add Song to Setlist Picker Modal
-  const [showAddSongToSetlistModal, setShowAddSongToSetlistModal] = useState(false);
-  const [setlistSearchQuery, setSetlistSearchQuery] = useState('');
-
-  // Edit Setlist Song Item Modal
-  const [editingSetlistSong, setEditingSetlistSong] = useState<{ index: number; song: SetlistSongItem } | null>(null);
+  // Church Members Directory for Designated Leader Search
+  const [churchMembers, setChurchMembers] = useState<ChurchMemberItem[]>([]);
+  const [showMemberPickerModal, setShowMemberPickerModal] = useState(false);
+  const [memberDirectorySearch, setMemberDirectorySearch] = useState('');
 
   // Chord & Lyrics Detail Modal with Transposition
   const [chordModalSong, setChordModalSong] = useState<FirebaseSongItem | null>(null);
@@ -235,39 +218,42 @@ export default function AdminSongsPage() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const [formTitle, setFormTitle] = useState('');
-  const [formTitleTe, setFormTitleTe] = useState('');
-  const [formArtist, setFormArtist] = useState('Worship Team');
-  const [formLedBy, setFormLedBy] = useState('');
-  const [formCategories, setFormCategories] = useState<string[]>(['Stuthi Songs']);
-  const [formKey, setFormKey] = useState('G');
-  const [formTimeSig, setFormTimeSig] = useState('4/4');
-  const [formTempo, setFormTempo] = useState<string>('72');
-  const [formVerses, setFormVerses] = useState('4V');
-  const [formPrelude, setFormPrelude] = useState('Acoustic + Drum');
-  const [formInterlude, setFormInterlude] = useState('Keys + Elec (Alt)');
-  const [formNotes, setFormNotes] = useState('');
-  const [formYoutubeUrl, setFormYoutubeUrl] = useState('');
-  const [formLyricsEn, setFormLyricsEn] = useState('');
-  const [formLyricsTe, setFormLyricsTe] = useState('');
-  const [formLyricsHi, setFormLyricsHi] = useState('');
-  const [formIsThemeSong, setFormIsThemeSong] = useState(false);
+  // Form Fields matching Mobile AdminSongEditor.tsx exactly
+  const [titleEn, setTitleEn] = useState('');
+  const [titleTe, setTitleTe] = useState('');
+  const [youtubeId, setYoutubeId] = useState('');
+  const [artist, setArtist] = useState('');
+  const [postLedBy, setPostLedBy] = useState('');
+  const [postLeaderSearch, setPostLeaderSearch] = useState('');
+
+  // Card 2: Musical Arrangement
+  const [songKey, setSongKey] = useState('C');
+  const [timeSignature, setTimeSignature] = useState('4/4');
+  const [tempo, setTempo] = useState('100');
+  const [verses, setVerses] = useState('4V');
+  const [prelude, setPrelude] = useState('');
+  const [interlude, setInterlude] = useState('');
+  const [notes, setNotes] = useState('');
+
+  // Card 3: Categories & Lyrics
+  const [categories, setCategories] = useState<string[]>(['Stuthi Songs']);
+  const [lyrics, setLyrics] = useState('');
+  const [lyricsTe, setLyricsTe] = useState('');
+  const [lyricsHi, setLyricsHi] = useState('');
+  const [status, setStatus] = useState<'published' | 'draft'>('published');
   const [editorLyricTab, setEditorLyricTab] = useState<'en' | 'te' | 'hi'>('en');
 
   // Delete State
   const [deleteTarget, setDeleteTarget] = useState<FirebaseSongItem | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  const notify = (msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(null), 4000);
-  };
-
-  const extractYouTubeId = (url: string) => {
-    if (!url) return '';
-    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|live\/|shorts\/))([\w-]{11})/);
-    return match ? match[1] : url.trim();
-  };
+  // Toast Auto-Dismiss
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
 
   // Load songs from church collection: Rhema Church/rhema/worshipSongs
   const loadSongs = async () => {
@@ -280,19 +266,30 @@ export default function AdminSongsPage() {
       const items: FirebaseSongItem[] = [];
       snap.forEach((docSnap) => {
         const d = docSnap.data();
+        const rawCategory = d.category || '';
+        const catArray = rawCategory
+          .split(';')
+          .map((c: string) => c.trim())
+          .filter(Boolean);
+
+        // Mobile Parity: A song is a theme song if isThemeSong is true OR category contains 'Theme Songs'
+        const isTheme =
+          Boolean(d.isThemeSong) ||
+          catArray.some((c: string) => c.toLowerCase() === 'theme songs');
+
         items.push({
           id: docSnap.id,
           title: d.title || d.titleEn || 'Untitled Song',
           titleTe: d.titleTe || '',
           titleEn: d.titleEn || d.title || '',
-          artist: d.artist || d.ledBy || 'Worship Team',
-          ledBy: d.ledBy || d.artist || 'Worship Team',
-          key: d.key || 'G',
+          artist: d.artist || d.ledBy || '',
+          ledBy: d.ledBy || d.artist || '',
+          key: d.key || 'C',
           timeSignature: d.timeSignature || '4/4',
-          tempo: d.tempo || '72',
-          category: d.category || 'Stuthi Songs',
+          tempo: d.tempo || '100',
+          category: rawCategory || 'Stuthi Songs',
           lyrics: d.lyrics || d.lyricsEn || '',
-          lyricsEn: d.lyricsEn || d.lyrics || (typeof d.verses === 'string' ? d.verses : ''),
+          lyricsEn: d.lyricsEn || d.lyrics || '',
           lyricsTe: d.lyricsTe || '',
           lyricsHi: d.lyricsHi || '',
           verses: d.verses || '4V',
@@ -300,7 +297,7 @@ export default function AdminSongsPage() {
           interlude: d.interlude || '',
           notes: d.notes || '',
           youtubeId: d.youtubeId || '',
-          isThemeSong: Boolean(d.isThemeSong),
+          isThemeSong: isTheme,
           status: d.status === 'draft' ? 'draft' : 'published',
           isChurchOwn: Boolean(d.isChurchOwn),
           createdAt: d.createdAt,
@@ -318,124 +315,89 @@ export default function AdminSongsPage() {
     }
   };
 
-  // Load Setlists from Firestore: Rhema Church/rhema/setlists/all_services
-  const loadSetlists = async () => {
+  // Load church members for leading person search
+  const loadChurchMembers = async () => {
     try {
-      const docRef = doc(db, 'Rhema Church', 'rhema', 'setlists', 'all_services');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists() && docSnap.data()?.services) {
-        const raw = docSnap.data().services;
-        if (Array.isArray(raw) && raw.length > 0) {
-          setServices(raw);
-          setActiveServiceId(raw[0].id);
-          return;
+      const memSnap = await getDocs(collection(db, 'Rhema Church', 'rhema', 'members'));
+      const memList: ChurchMemberItem[] = [];
+      memSnap.forEach((docSnap) => {
+        const d = docSnap.data();
+        const name = d.name || d.fullName || `${d.firstName || ''} ${d.lastName || ''}`.trim();
+        if (name) {
+          memList.push({
+            id: docSnap.id,
+            name,
+            phone: d.phone || d.phoneNumber || '',
+          });
         }
-      }
-
-      // Initialize default services if none exist
-      const defaultServices: WorshipService[] = [
-        {
-          id: 'service_1',
-          name: 'Sunday 1st Service (8:30 AM)',
-          date: new Date().toISOString().slice(0, 10),
-          time: '08:30 AM',
-          songs: [],
-        },
-        {
-          id: 'service_2',
-          name: 'Sunday 2nd Service (10:30 AM)',
-          date: new Date().toISOString().slice(0, 10),
-          time: '10:30 AM',
-          songs: [],
-        },
-        {
-          id: 'service_3',
-          name: 'Midweek Fellowship Service',
-          date: new Date().toISOString().slice(0, 10),
-          time: '07:00 PM',
-          songs: [],
-        },
-      ];
-      setServices(defaultServices);
-      setActiveServiceId('service_1');
-    } catch (e) {
-      console.warn('Error loading setlists:', e);
-    }
-  };
-
-  // Save Services to Firestore
-  const saveServicesToFirestore = async (newServices: WorshipService[]) => {
-    setServices(newServices);
-    try {
-      const docRef = doc(db, 'Rhema Church', 'rhema', 'setlists', 'all_services');
-      await setDoc(docRef, {
-        services: newServices,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-
-      // Sync legacy 1S and 2S setlists
-      const s1 = newServices.find((s) => s.id === 'service_1' || s.name.includes('1st'));
-      if (s1) {
-        await setDoc(doc(db, 'Rhema Church', 'rhema', 'setlists', '1S'), {
-          service: '1S',
-          items: s1.songs,
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-      }
-    } catch (e) {
-      console.warn('Error saving setlists to Firestore:', e);
+      });
+      setChurchMembers(memList);
+    } catch (err) {
+      console.warn('Error loading church members:', err);
     }
   };
 
   useEffect(() => {
     loadSongs();
-    loadSetlists();
+    loadChurchMembers();
   }, []);
 
-  // Summary Metrics for Dashboard
+  // Summary Metrics for Dashboard (3 Equal Width Cards matching mobile overview)
   const stats = useMemo(() => {
     const total = songs.length;
-    const theme = songs.filter((s) => s.isThemeSong).length;
-    const published = songs.filter((s) => s.status === 'published').length;
-    const setlistCount = services.length;
-    return { total, theme, published, setlistCount };
-  }, [songs, services]);
+    // Real-time count of theme songs (checking isThemeSong OR category 'Theme Songs')
+    const theme = songs.filter(
+      (s) =>
+        s.isThemeSong ||
+        (s.category &&
+          s.category
+            .split(';')
+            .map((c) => c.trim().toLowerCase())
+            .includes('theme songs'))
+    ).length;
+    return { total, theme, activeGenres: CANONICAL_SONG_CATEGORIES.length - 1 };
+  }, [songs]);
 
-  // Active Service Object
-  const currentService = useMemo(() => {
-    return services.find((s) => s.id === activeServiceId) || services[0];
-  }, [services, activeServiceId]);
-
-  // Filtered Songs
+  // Filtered Songs for Active Tab & Search
   const filteredSongs = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
 
     return songs.filter((s) => {
-      // Tab filter
-      if (activeTab === 'theme' && !s.isThemeSong) return false;
+      // Tab filter: 'all' vs 'theme'
+      const isTheme =
+        Boolean(s.isThemeSong) ||
+        (s.category &&
+          s.category
+            .split(';')
+            .map((c) => c.trim().toLowerCase())
+            .includes('theme songs'));
+
+      if (activeTab === 'theme' && !isTheme) return false;
 
       // Category filter
       if (categoryFilter !== 'All') {
         if (categoryFilter === 'Theme Songs') {
-          if (!s.isThemeSong) return false;
+          if (!isTheme) return false;
         } else {
-          const cats = s.category ? s.category.split(';').map((c) => c.trim().toLowerCase()) : [];
+          const cats = s.category
+            ? s.category.split(';').map((c) => c.trim().toLowerCase())
+            : [];
           if (!cats.includes(categoryFilter.toLowerCase())) return false;
         }
       }
 
-      // Key filter
+      // Musical Key filter
       if (keyFilter !== 'All') {
         if ((s.key || '').toLowerCase() !== keyFilter.toLowerCase()) return false;
       }
 
-      // Search query
+      // Search query filter (titles, artist, leader, lyrics)
       if (q) {
         const tEn = (s.title || s.titleEn || '').toLowerCase();
         const tTe = (s.titleTe || '').toLowerCase();
-        const artist = (s.artist || s.ledBy || '').toLowerCase();
-        const lyrics = (s.lyrics || s.lyricsEn || s.lyricsTe || '').toLowerCase();
-        if (!tEn.includes(q) && !tTe.includes(q) && !artist.includes(q) && !lyrics.includes(q)) {
+        const art = (s.artist || s.ledBy || '').toLowerCase();
+        const lyr = (s.lyrics || s.lyricsEn || s.lyricsTe || '').toLowerCase();
+        if (!tEn.includes(q) && !tTe.includes(q) && !art.includes(q) && !lyr.includes(q)) {
           return false;
         }
       }
@@ -444,27 +406,57 @@ export default function AdminSongsPage() {
     });
   }, [songs, activeTab, categoryFilter, keyFilter, searchQuery]);
 
-  // Toggle Theme Song directly on card (Matching mobile screenshot ☆ MAKE THEME)
+  // Toggle Theme Song directly on card (Matching mobile screenshot & Firestore logic exactly)
   const handleToggleThemeSong = async (song: FirebaseSongItem) => {
-    const newStatus = !song.isThemeSong;
+    const willBeTheme = !song.isThemeSong;
+    const currentCats = (song.category || 'Stuthi Songs')
+      .split(';')
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    let newCats: string[];
+    if (willBeTheme) {
+      if (!currentCats.some((c) => c.toLowerCase() === 'theme songs')) {
+        newCats = [...currentCats, 'Theme Songs'];
+      } else {
+        newCats = currentCats;
+      }
+    } else {
+      newCats = currentCats.filter((c) => c.toLowerCase() !== 'theme songs');
+      if (newCats.length === 0) newCats = ['Stuthi Songs'];
+    }
+    const newCatStr = newCats.join(';');
+
+    // Optimistic local update
+    setSongs((prev) =>
+      prev.map((s) =>
+        s.id === song.id ? { ...s, isThemeSong: willBeTheme, category: newCatStr } : s
+      )
+    );
+    setToast(
+      willBeTheme
+        ? `Marked "${song.title}" as Church Theme Song`
+        : `Removed Theme status from "${song.title}"`
+    );
+
     try {
       const docRef = doc(db, 'Rhema Church', 'rhema', 'worshipSongs', song.id);
       await updateDoc(docRef, {
-        isThemeSong: newStatus,
+        isThemeSong: willBeTheme,
+        category: newCatStr,
         updatedAt: serverTimestamp(),
       });
-
-      setSongs((prev) =>
-        prev.map((s) => (s.id === song.id ? { ...s, isThemeSong: newStatus } : s))
-      );
-      notify(
-        newStatus
-          ? `⭐ Marked "${song.title}" as Church Theme Song`
-          : `Removed "${song.title}" from Theme Songs`
-      );
+      // Also sync to masterSongs if present
+      try {
+        await updateDoc(doc(db, 'masterSongs', song.id), {
+          isThemeSong: willBeTheme,
+          category: newCatStr,
+          updatedAt: serverTimestamp(),
+        });
+      } catch {}
     } catch (err) {
-      console.error('Error updating theme song status:', err);
-      notify('Failed to update theme song status');
+      console.error('Failed to update theme status in Firestore:', err);
+      loadSongs();
     }
   };
 
@@ -472,23 +464,24 @@ export default function AdminSongsPage() {
   const openCreateModal = () => {
     setEditingSongId(null);
     setFormError(null);
-    setFormTitle('');
-    setFormTitleTe('');
-    setFormArtist('Worship Team');
-    setFormLedBy('Worship Team');
-    setFormCategories(['Stuthi Songs']);
-    setFormKey('G');
-    setFormTimeSig('4/4');
-    setFormTempo('72');
-    setFormVerses('4V');
-    setFormPrelude('Acoustic + Drum');
-    setFormInterlude('Keys + Elec (Alt)');
-    setFormNotes('');
-    setFormYoutubeUrl('');
-    setFormLyricsEn('');
-    setFormLyricsTe('');
-    setFormLyricsHi('');
-    setFormIsThemeSong(false);
+    setTitleEn('');
+    setTitleTe('');
+    setYoutubeId('');
+    setArtist('');
+    setPostLedBy('');
+    setPostLeaderSearch('');
+    setSongKey('C');
+    setTimeSignature('4/4');
+    setTempo('100');
+    setVerses('4V');
+    setPrelude('');
+    setInterlude('');
+    setNotes('');
+    setCategories(['Stuthi Songs']);
+    setLyrics('');
+    setLyricsTe('');
+    setLyricsHi('');
+    setStatus('published');
     setEditorLyricTab('en');
     setEditorOpen(true);
   };
@@ -497,235 +490,175 @@ export default function AdminSongsPage() {
   const openEditModal = (song: FirebaseSongItem) => {
     setEditingSongId(song.id);
     setFormError(null);
-    setFormTitle(song.title || song.titleEn || '');
-    setFormTitleTe(song.titleTe || '');
-    setFormArtist(song.artist || song.ledBy || 'Worship Team');
-    setFormLedBy(song.ledBy || song.artist || 'Worship Team');
+    setTitleEn(song.title || song.titleEn || '');
+    setTitleTe(song.titleTe || '');
+    setYoutubeId(song.youtubeId || '');
+    setArtist(song.artist || '');
+    setPostLedBy(song.ledBy || song.artist || '');
+    setPostLeaderSearch('');
+    setSongKey(song.key || 'C');
+    setTimeSignature(song.timeSignature || '4/4');
+    setTempo(String(song.tempo || '100'));
+    setVerses(song.verses || '4V');
+    setPrelude(song.prelude || '');
+    setInterlude(song.interlude || '');
+    setNotes(song.notes || '');
 
-    const cats = song.category
-      ? song.category.split(';').map((c) => c.trim()).filter(Boolean)
-      : ['Stuthi Songs'];
-    setFormCategories(cats);
+    const catArray = (song.category || '')
+      .split(';')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    setCategories(catArray.length > 0 ? catArray : ['Stuthi Songs']);
 
-    setFormKey(song.key || 'G');
-    setFormTimeSig(song.timeSignature || '4/4');
-    setFormTempo(String(song.tempo || '72'));
-    setFormVerses(song.verses || '4V');
-    setFormPrelude(song.prelude || 'Acoustic + Drum');
-    setFormInterlude(song.interlude || 'Keys + Elec (Alt)');
-    setFormNotes(song.notes || '');
-    setFormYoutubeUrl(song.youtubeId ? `https://youtu.be/${song.youtubeId}` : '');
-    setFormLyricsEn(song.lyricsEn || song.lyrics || '');
-    setFormLyricsTe(song.lyricsTe || '');
-    setFormLyricsHi(song.lyricsHi || '');
-    setFormIsThemeSong(Boolean(song.isThemeSong));
+    setLyrics(song.lyricsEn || song.lyrics || '');
+    setLyricsTe(song.lyricsTe || '');
+    setLyricsHi(song.lyricsHi || '');
+    setStatus(song.status || 'published');
     setEditorLyricTab('en');
     setEditorOpen(true);
   };
 
-  // Toggle Category selection in form
-  const toggleFormCategory = (cat: string) => {
-    setFormCategories((prev) =>
+  // Toggle Category Chip in Modal Form
+  const toggleCategory = (cat: string) => {
+    setCategories((prev) =>
       prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
     );
   };
 
-  // Save Song (Create or Update)
+  // Save Song to Firestore
   const handleSaveSong = async () => {
-    setFormError(null);
-
-    if (!formTitle.trim()) {
+    if (!titleEn.trim()) {
       setFormError('Song Title (English) is required.');
       return;
     }
-    if (formCategories.length === 0) {
+
+    if (categories.length === 0) {
       setFormError('Please select at least one song category.');
       return;
     }
 
-    setFormSubmitting(true);
-    const cleanYt = extractYouTubeId(formYoutubeUrl);
-
-    const payload: any = {
-      title: formTitle.trim(),
-      titleEn: formTitle.trim(),
-      titleTe: formTitleTe.trim(),
-      artist: formArtist.trim(),
-      ledBy: formLedBy.trim() || formArtist.trim(),
-      key: formKey,
-      timeSignature: formTimeSig,
-      tempo: formTempo.trim() || '72',
-      verses: formVerses.trim() || '4V',
-      category: formCategories.join(';'),
-      prelude: formPrelude.trim(),
-      interlude: formInterlude.trim(),
-      notes: formNotes.trim(),
-      youtubeId: cleanYt,
-      lyrics: formLyricsEn.trim(),
-      lyricsEn: formLyricsEn.trim(),
-      lyricsTe: formLyricsTe.trim(),
-      lyricsHi: formLyricsHi.trim(),
-      isThemeSong: formIsThemeSong,
-      status: 'published',
-      updatedAt: serverTimestamp(),
-    };
-
     try {
+      setFormSubmitting(true);
+      setFormError(null);
+
+      const isTheme = categories.includes('Theme Songs');
+      const categoryStr = categories.join(';');
+
+      const payload = {
+        title: titleEn.trim(),
+        titleEn: titleEn.trim(),
+        titleTe: titleTe.trim(),
+        artist: artist.trim() || postLedBy.trim() || 'Worship Team',
+        ledBy: postLedBy.trim() || artist.trim() || 'Worship Team',
+        key: songKey,
+        timeSignature: timeSignature.trim() || '4/4',
+        tempo: tempo.trim() || '100',
+        verses: verses.trim() || '4V',
+        prelude: prelude.trim(),
+        interlude: interlude.trim(),
+        notes: notes.trim(),
+        youtubeId: youtubeId.trim(),
+        category: categoryStr,
+        isThemeSong: isTheme,
+        lyrics: lyrics.trim() || lyricsTe.trim() || '',
+        lyricsEn: lyrics.trim(),
+        lyricsTe: lyricsTe.trim(),
+        lyricsHi: lyricsHi.trim(),
+        status: status,
+        updatedAt: serverTimestamp(),
+      };
+
       if (editingSongId) {
+        // Update existing song
         const docRef = doc(db, 'Rhema Church', 'rhema', 'worshipSongs', editingSongId);
         await updateDoc(docRef, payload);
-        notify(`Updated song: ${formTitle}`);
+        try {
+          await updateDoc(doc(db, 'masterSongs', editingSongId), payload);
+        } catch {}
+        setToast(`Updated "${titleEn.trim()}" successfully.`);
       } else {
+        // Create new song
         const colRef = collection(db, 'Rhema Church', 'rhema', 'worshipSongs');
-        await addDoc(colRef, {
+        const docRef = await addDoc(colRef, {
           ...payload,
           createdAt: serverTimestamp(),
         });
-        notify(`Added new song: ${formTitle}`);
+        try {
+          await updateDoc(doc(db, 'masterSongs', docRef.id), {
+            ...payload,
+            createdAt: serverTimestamp(),
+          });
+        } catch {}
+        setToast(`Published "${titleEn.trim()}" to Church Library.`);
       }
 
       setEditorOpen(false);
       await loadSongs();
     } catch (err: any) {
-      console.error('Song save error:', err);
-      setFormError(err?.message || 'Failed to save song document.');
+      console.error('Error saving worship song:', err);
+      setFormError(err.message || 'Failed to save worship song to Firestore.');
     } finally {
       setFormSubmitting(false);
     }
   };
 
-  // Delete Song Permanently
+  // Delete Song from Firestore
   const handleDeleteSong = async () => {
     if (!deleteTarget) return;
-    setDeleteSubmitting(true);
     try {
-      const docRef = doc(db, 'Rhema Church', 'rhema', 'worshipSongs', deleteTarget.id);
-      await deleteDoc(docRef);
-      notify(`Deleted song: ${deleteTarget.title}`);
+      setDeleteSubmitting(true);
+      await deleteDoc(doc(db, 'Rhema Church', 'rhema', 'worshipSongs', deleteTarget.id));
+      try {
+        await deleteDoc(doc(db, 'masterSongs', deleteTarget.id));
+      } catch {}
+      setToast(`Deleted "${deleteTarget.title}" from library.`);
       setDeleteTarget(null);
       await loadSongs();
     } catch (err: any) {
-      console.error('Delete error:', err);
-      notify(err?.message || 'Failed to delete song.');
+      console.error('Error deleting song:', err);
+      alert('Failed to delete song: ' + (err.message || 'Unknown error'));
     } finally {
       setDeleteSubmitting(false);
     }
   };
 
-  // Open Chord & Lyrics Modal with Transposition
+  // Open Chord Sheet & Transposition Viewer
   const openChordModal = (song: FirebaseSongItem) => {
     setChordModalSong(song);
     setTransposeShift(0);
-    setChordModalTab(song.lyricsEn ? 'chords' : song.lyricsTe ? 'telugu' : 'chords');
+    setChordModalTab('chords');
   };
 
-  // Transposed Key calculation
+  // Transposed Key for Chord Viewer
   const currentTransposedKey = useMemo(() => {
-    if (!chordModalSong) return 'G';
-    return transposeKey(chordModalSong.key || 'G', transposeShift);
+    if (!chordModalSong) return 'C';
+    return transposeKey(chordModalSong.key || 'C', transposeShift);
   }, [chordModalSong, transposeShift]);
 
-  // Transposed Chord Sheet text
-  const currentTransposedChords = useMemo(() => {
+  // Transposed Chord Sheet Body
+  const transposedBody = useMemo(() => {
     if (!chordModalSong) return '';
     const raw = chordModalSong.lyricsEn || chordModalSong.lyrics || '';
     return transposeChordSheet(raw, transposeShift);
   }, [chordModalSong, transposeShift]);
 
-  // ─── Setlist Builder Operations ───
-  const handleAddSongToSetlist = (song: FirebaseSongItem) => {
-    if (!currentService) return;
-    const exists = (currentService.songs || []).some((s) => s.id === song.id);
-    if (exists) {
-      notify(`"${song.title}" is already in ${currentService.name}`);
-      return;
-    }
-
-    const newItem: SetlistSongItem = {
-      id: song.id,
-      title: song.title,
-      titleTe: song.titleTe,
-      key: song.key || 'G',
-      tempo: song.tempo || '72',
-      timeSignature: song.timeSignature || '4/4',
-      ledBy: song.ledBy || song.artist || 'Worship Leader',
-      prelude: song.prelude || 'Acoustic + Drum',
-      interlude: song.interlude || 'Keys + Elec (Alt)',
-      notes: song.notes || '',
-      verses: song.verses || '4V',
-    };
-
-    const updated = services.map((s) => {
-      if (s.id === currentService.id) {
-        return {
-          ...s,
-          songs: [...(s.songs || []), newItem],
-        };
-      }
-      return s;
-    });
-
-    saveServicesToFirestore(updated);
-    setShowAddSongToSetlistModal(false);
-    notify(`Added "${song.title}" to ${currentService.name}`);
-  };
-
-  const handleRemoveSongFromSetlist = (index: number) => {
-    if (!currentService) return;
-    const songName = currentService.songs[index]?.title || 'Song';
-    const updatedSongs = currentService.songs.filter((_, idx) => idx !== index);
-    const updated = services.map((s) => (s.id === currentService.id ? { ...s, songs: updatedSongs } : s));
-    saveServicesToFirestore(updated);
-    notify(`Removed "${songName}" from setlist`);
-  };
-
-  const handleMoveSetlistSong = (index: number, direction: 'up' | 'down') => {
-    if (!currentService) return;
-    const list = [...currentService.songs];
-    const targetIdx = direction === 'up' ? index - 1 : index + 1;
-    if (targetIdx < 0 || targetIdx >= list.length) return;
-
-    const temp = list[index];
-    list[index] = list[targetIdx];
-    list[targetIdx] = temp;
-
-    const updated = services.map((s) => (s.id === currentService.id ? { ...s, songs: list } : s));
-    saveServicesToFirestore(updated);
-  };
-
-  const handleSaveSetlistSongEdit = () => {
-    if (!editingSetlistSong || !currentService) return;
-    const list = [...currentService.songs];
-    list[editingSetlistSong.index] = editingSetlistSong.song;
-
-    const updated = services.map((s) => (s.id === currentService.id ? { ...s, songs: list } : s));
-    saveServicesToFirestore(updated);
-    setEditingSetlistSong(null);
-    notify('Updated song chart details for service');
-  };
-
-  const handleCreateService = () => {
-    if (!newServiceName.trim()) return;
-    const newService: WorshipService = {
-      id: `service_${Date.now()}`,
-      name: newServiceName.trim(),
-      date: newServiceDate,
-      time: newServiceTime,
-      songs: [],
-    };
-    const updated = [...services, newService];
-    saveServicesToFirestore(updated);
-    setActiveServiceId(newService.id);
-    setShowAddServiceModal(false);
-    setNewServiceName('');
-    notify(`Created new service setlist: ${newService.name}`);
+  // Extract clean YouTube embed ID
+  const extractYouTubeId = (url: string) => {
+    if (!url) return '';
+    const clean = url.trim();
+    const match = clean.match(
+      /(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=|shorts\/|live\/))([\w-]{11})/
+    );
+    if (match) return match[1];
+    if (/^[a-zA-Z0-9_-]{11}$/.test(clean)) return clean;
+    return clean;
   };
 
   return (
     <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
       <AdminNavigationShell>
-        <div className="space-y-6 max-w-7xl mx-auto pb-16">
-          {/* TOAST NOTIFICATION */}
+        <div className="p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto pb-24">
+          {/* Toast Notification */}
           {toast && (
             <div className="fixed bottom-6 right-6 z-50 bg-slate-950 text-white border border-amber-500/40 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-5">
               <CheckCircle2 size={18} className="text-amber-400 shrink-0" />
@@ -733,7 +666,7 @@ export default function AdminSongsPage() {
             </div>
           )}
 
-          {/* TOP HEADER */}
+          {/* TOP APP HEADER */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-5">
             <div>
               <div className="flex items-center gap-2">
@@ -745,7 +678,7 @@ export default function AdminSongsPage() {
                 </h1>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                Curate bilingual church song catalog, interactive chord sheets, transposition &amp; service setlists
+                Curate bilingual church song catalog, interactive chord sheets, transposition &amp; theme songs
               </p>
             </div>
 
@@ -771,11 +704,14 @@ export default function AdminSongsPage() {
             </div>
           </div>
 
-          {/* 1. TOP SUMMARY CARDS (Equal Width, Fill 100% Available Content Area) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+          {/* 1. TOP SUMMARY CARDS (Equal Width, Matching Mobile Overview) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
             {/* Card 1: TOTAL SONGS */}
             <div
-              onClick={() => setActiveTab('all')}
+              onClick={() => {
+                setActiveTab('all');
+                setCategoryFilter('All');
+              }}
               className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-32 ${
                 activeTab === 'all'
                   ? 'border-blue-500 bg-blue-50/70 dark:bg-blue-950/20 ring-2 ring-blue-500/20'
@@ -796,7 +732,10 @@ export default function AdminSongsPage() {
 
             {/* Card 2: THEME SONGS */}
             <div
-              onClick={() => setActiveTab('theme')}
+              onClick={() => {
+                setActiveTab('theme');
+                setCategoryFilter('All');
+              }}
               className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-32 ${
                 activeTab === 'theme'
                   ? 'border-amber-500 bg-amber-50/70 dark:bg-amber-950/20 ring-2 ring-amber-500/20'
@@ -815,33 +754,12 @@ export default function AdminSongsPage() {
               </div>
             </div>
 
-            {/* Card 3: SERVICE SETLISTS */}
-            <div
-              onClick={() => setActiveTab('setlists')}
-              className={`p-5 rounded-3xl border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col justify-between h-32 ${
-                activeTab === 'setlists'
-                  ? 'border-purple-500 bg-purple-50/70 dark:bg-purple-950/20 ring-2 ring-purple-500/20'
-                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-purple-400/50'
-              }`}
-            >
-              <div className="w-8 h-1.5 rounded-full bg-purple-500" />
-              <div>
-                <span className="text-3xl font-extrabold text-slate-900 dark:text-white block tracking-tight">
-                  {stats.setlistCount}
-                </span>
-                <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300 mt-1 block">
-                  SERVICE SETLISTS
-                </span>
-                <span className="text-[11px] text-slate-400 font-medium">Live Sunday builder</span>
-              </div>
-            </div>
-
-            {/* Card 4: SONG CATEGORIES */}
+            {/* Card 3: SONG CATEGORIES */}
             <div className="p-5 rounded-3xl border border-emerald-200/80 dark:border-emerald-900/40 bg-white dark:bg-slate-900 shadow-sm relative overflow-hidden flex flex-col justify-between h-32">
               <div className="w-8 h-1.5 rounded-full bg-emerald-500" />
               <div>
                 <span className="text-3xl font-extrabold text-emerald-600 dark:text-emerald-400 block tracking-tight">
-                  {CANONICAL_SONG_CATEGORIES.length - 1}
+                  {stats.activeGenres}
                 </span>
                 <span className="text-xs font-black uppercase tracking-wider text-emerald-950 dark:text-emerald-200 mt-1 block">
                   ACTIVE GENRES
@@ -853,510 +771,289 @@ export default function AdminSongsPage() {
             </div>
           </div>
 
-          {/* 2. MAIN SEGMENTED CONTROLS (All Songs / Theme Songs / Setlists) */}
-          <div className="flex items-center justify-between gap-4 bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <div className="flex items-center gap-1.5 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={() => setActiveTab('all')}
-                className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                  activeTab === 'all'
-                    ? 'bg-black dark:bg-white text-white dark:text-black shadow'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Music size={14} />
-                <span>All Songs ({songs.length})</span>
-              </button>
+          {/* 2. MAIN SEGMENTED NAVIGATION: ONLY 'All Songs' and 'Theme Songs' MATCHING MOBILE APP */}
+          <div className="flex items-center justify-between gap-4 bg-slate-100 dark:bg-slate-950 p-1.5 rounded-2xl border border-slate-200 dark:border-slate-800 max-w-md">
+            <button
+              type="button"
+              onClick={() => setActiveTab('all')}
+              className={`flex-1 px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                activeTab === 'all'
+                  ? 'bg-black dark:bg-white text-white dark:text-black shadow'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Music size={14} />
+              <span>All Songs ({songs.length})</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => setActiveTab('theme')}
-                className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                  activeTab === 'theme'
-                    ? 'bg-black dark:bg-white text-white dark:text-black shadow'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Star size={14} className={activeTab === 'theme' ? 'fill-amber-400 text-amber-400' : ''} />
-                <span>Theme Songs ({stats.theme})</span>
-              </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('theme')}
+              className={`flex-1 px-6 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                activeTab === 'theme'
+                  ? 'bg-[#FA6203] text-white shadow'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Star size={14} className={activeTab === 'theme' ? 'fill-white text-white' : ''} />
+              <span>Theme Songs ({stats.theme})</span>
+            </button>
+          </div>
 
-              <button
-                type="button"
-                onClick={() => setActiveTab('setlists')}
-                className={`flex-1 sm:flex-initial px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
-                  activeTab === 'setlists'
-                    ? 'bg-black dark:bg-white text-white dark:text-black shadow'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Layers size={14} />
-                <span>Service Setlists ({services.length})</span>
-              </button>
+          {/* 3. CATEGORIES & GENRES RIBBON */}
+          <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-3">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
+              <span>Categories &amp; Genres</span>
+              <span>{filteredSongs.length} songs shown</span>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {CANONICAL_SONG_CATEGORIES.map((cat) => {
+                const isSelected = categoryFilter === cat;
+                const count =
+                  cat === 'All'
+                    ? songs.length
+                    : cat === 'Theme Songs'
+                    ? stats.theme
+                    : songs.filter((s) => {
+                        const cArr = s.category ? s.category.split(';') : [];
+                        return cArr.some((c) => c.trim().toLowerCase() === cat.toLowerCase());
+                      }).length;
+
+                return (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategoryFilter(cat)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border flex items-center gap-2 ${
+                      isSelected
+                        ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
+                        : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                    }`}
+                  >
+                    <span>{cat}</span>
+                    <span
+                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
+                        isSelected
+                          ? 'bg-white/20 text-white dark:bg-slate-800 dark:text-slate-200'
+                          : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* ───────────────────────────────────────────────────────────── */}
-          {/* TAB 1 & 2: SONG LIBRARY (ALL SONGS / THEME SONGS) */}
-          {/* ───────────────────────────────────────────────────────────── */}
-          {activeTab !== 'setlists' && (
-            <div className="space-y-6">
-              {/* Category Filter Pills (Exact Mobile Parity) */}
-              <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm space-y-3">
-                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 uppercase tracking-wider px-1">
-                  <span>Categories &amp; Genres</span>
-                  <span>{filteredSongs.length} songs shown</span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  {CANONICAL_SONG_CATEGORIES.map((cat) => {
-                    const isSelected = categoryFilter === cat;
-                    const count =
-                      cat === 'All'
-                        ? songs.length
-                        : cat === 'Theme Songs'
-                        ? songs.filter((s) => s.isThemeSong).length
-                        : songs.filter((s) => {
-                            const cArr = s.category ? s.category.split(';') : [];
-                            return cArr.some((c) => c.trim().toLowerCase() === cat.toLowerCase());
-                          }).length;
-
-                    return (
-                      <button
-                        key={cat}
-                        type="button"
-                        onClick={() => setCategoryFilter(cat)}
-                        className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border flex items-center gap-2 ${
-                          isSelected
-                            ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
-                            : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300'
-                        }`}
-                      >
-                        <span>{cat}</span>
-                        <span
-                          className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                            isSelected
-                              ? 'bg-white/20 text-white dark:bg-slate-800 dark:text-slate-200'
-                              : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                          }`}
-                        >
-                          {count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Search & Musical Key Filter Row */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2 relative">
-                  <Search
-                    size={16}
-                    className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Search songs by title (English/Telugu), worship leader, or lyrics..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 shadow-sm"
-                  />
-                </div>
-
-                <div>
-                  <select
-                    value={keyFilter}
-                    onChange={(e) => setKeyFilter(e.target.value)}
-                    className="w-full py-3 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 shadow-sm font-semibold"
-                  >
-                    <option value="All">All Musical Keys</option>
-                    <optgroup label="Major Keys">
-                      {CHROMATIC_KEYS.map((k) => (
-                        <option key={k} value={k}>
-                          Key {k}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Minor Keys">
-                      {MINOR_KEYS.map((k) => (
-                        <option key={k} value={k}>
-                          Key {k}
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
-              </div>
-
-              {/* Songs Listing (Responsive 2 or 3-column Grid Layout) */}
-              {loading && songs.length === 0 ? (
-                <div className="p-16 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
-                  <RefreshCw size={24} className="animate-spin text-amber-500" />
-                  <span>Loading worship song catalog from Firestore...</span>
-                </div>
-              ) : filteredSongs.length === 0 ? (
-                <div className="p-12 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
-                  <Music size={32} className="mx-auto text-slate-400 mb-2" />
-                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    No worship songs found
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Try adjusting your search query, key filter, or create a new song.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                  {filteredSongs.map((song, idx) => {
-                    const cleanYt = extractYouTubeId(song.youtubeId || '');
-
-                    return (
-                      <div
-                        key={song.id}
-                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm hover:border-amber-500/40 hover:shadow-md transition-all flex flex-col justify-between space-y-4 group"
-                      >
-                        {/* Header Row: Index Number & Badges */}
-                        <div className="space-y-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2.5">
-                              {/* Song Index Number matching mobile card */}
-                              <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-extrabold text-xs flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm">
-                                {idx + 1}
-                              </div>
-
-                              {/* Musical Key Badge */}
-                              <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 text-[11px] font-black tracking-wider">
-                                Key {song.key || 'G'}
-                              </span>
-
-                              {/* Time Signature */}
-                              {song.timeSignature && (
-                                <span className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 text-[10px] font-bold">
-                                  {song.timeSignature}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Theme Song Indicator */}
-                            {song.isThemeSong && (
-                              <span className="px-2 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
-                                <Star size={10} className="fill-amber-500 text-amber-500" />
-                                <span>Theme</span>
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Song Titles */}
-                          <div>
-                            <h3 className="text-base font-bold text-slate-900 dark:text-white line-clamp-1 leading-snug">
-                              {song.title}
-                            </h3>
-                            {song.titleTe && (
-                              <p className="text-xs text-amber-700 dark:text-amber-400 font-serif font-medium line-clamp-1 mt-0.5">
-                                {song.titleTe}
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Categories & Worship Leader */}
-                          <div className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
-                            <p className="flex items-center gap-1.5 text-[11px]">
-                              <Mic size={12} className="text-slate-400 shrink-0" />
-                              <span className="text-slate-700 dark:text-slate-300 font-medium truncate">
-                                Led by: {song.ledBy || song.artist || 'Worship Team'}
-                              </span>
-                            </p>
-
-                            <div className="flex flex-wrap gap-1 pt-1">
-                              {(song.category ? song.category.split(';') : ['Stuthi Songs']).map((c, i) => (
-                                <span
-                                  key={i}
-                                  className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-semibold"
-                                >
-                                  {c.trim()}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Bottom Actions Row (Exact Mobile Parity) */}
-                        <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
-                          {/* Toggle Theme Button matching mobile screenshot */}
-                          <button
-                            type="button"
-                            onClick={() => handleToggleThemeSong(song)}
-                            className={`px-3 py-1.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all ${
-                              song.isThemeSong
-                                ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300'
-                                : 'border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:border-amber-400 hover:text-amber-600'
-                            }`}
-                          >
-                            <Star
-                              size={12}
-                              className={song.isThemeSong ? 'fill-amber-500 text-amber-500' : ''}
-                            />
-                            <span>{song.isThemeSong ? 'THEME SONG' : 'MAKE THEME'}</span>
-                          </button>
-
-                          <div className="flex items-center gap-1.5">
-                            {/* Chords & Transpose Preview */}
-                            <button
-                              type="button"
-                              onClick={() => openChordModal(song)}
-                              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                              title="View Chords, Lyrics & Transpose"
-                            >
-                              <Eye size={14} />
-                            </button>
-
-                            {/* Edit Button */}
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(song)}
-                              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                              title="Edit Worship Song"
-                            >
-                              <Edit3 size={14} />
-                            </button>
-
-                            {/* Delete Button */}
-                            <button
-                              type="button"
-                              onClick={() => setDeleteTarget(song)}
-                              className="p-2 rounded-xl border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                              title="Delete Song"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+          {/* 4. SEARCH & MUSICAL KEY FILTER */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2 relative">
+              <Search
+                size={16}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                type="text"
+                placeholder="Search songs by title (English/Telugu), worship leader, or lyrics..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-11 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 shadow-sm"
+              />
             </div>
-          )}
 
-          {/* ───────────────────────────────────────────────────────────── */}
-          {/* TAB 3: SERVICE SETLISTS & SETLIST BUILDER */}
-          {/* ───────────────────────────────────────────────────────────── */}
-          {activeTab === 'setlists' && (
-            <div className="space-y-6">
-              {/* Services Selector & Add Service Row */}
-              <div className="p-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3 overflow-x-auto pb-1 sm:pb-0">
-                  {services.map((svc) => {
-                    const isSelected = svc.id === activeServiceId;
-                    return (
-                      <button
-                        key={svc.id}
-                        type="button"
-                        onClick={() => setActiveServiceId(svc.id)}
-                        className={`px-4 py-2 rounded-2xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-2 ${
-                          isSelected
-                            ? 'bg-purple-600 text-white border-purple-600 shadow'
-                            : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300'
-                        }`}
-                      >
-                        <Calendar size={13} />
-                        <span>{svc.name}</span>
-                        <span
-                          className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${
-                            isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 dark:bg-slate-800'
-                          }`}
-                        >
-                          {(svc.songs || []).length}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
+            <div>
+              <select
+                value={keyFilter}
+                onChange={(e) => setKeyFilter(e.target.value)}
+                className="w-full py-3 px-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 shadow-sm font-semibold"
+              >
+                <option value="All">All Musical Keys</option>
+                <optgroup label="Major Keys">
+                  {CHROMATIC_KEYS.map((k) => (
+                    <option key={k} value={k}>
+                      Key {k}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Minor Keys">
+                  {MINOR_KEYS.map((k) => (
+                    <option key={k} value={k}>
+                      Key {k}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </div>
+          </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddServiceModal(true)}
-                    className="px-3.5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 shadow-sm hover:opacity-90 transition-all"
+          {/* 5. SONG CARDS LISTING (2/3-Column Grid Matching Mobile UI) */}
+          {loading && songs.length === 0 ? (
+            <div className="p-16 text-center text-slate-500 text-xs flex flex-col items-center gap-2">
+              <RefreshCw size={24} className="animate-spin text-amber-500" />
+              <span>Loading worship song catalog from Firestore...</span>
+            </div>
+          ) : filteredSongs.length === 0 ? (
+            <div className="p-12 text-center border border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
+              <Music size={32} className="mx-auto text-slate-400 mb-2" />
+              <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                {activeTab === 'theme' ? 'No Theme Songs Found' : 'No Worship Songs Found'}
+              </p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                {activeTab === 'theme'
+                  ? 'Click "MAKE THEME" on any song card to mark it as a Church Theme Song.'
+                  : 'Try adjusting your search query, key filter, or create a new song.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+              {filteredSongs.map((song, idx) => {
+                const cleanYt = extractYouTubeId(song.youtubeId || '');
+
+                return (
+                  <div
+                    key={song.id}
+                    className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 shadow-sm hover:border-amber-500/40 hover:shadow-md transition-all flex flex-col justify-between space-y-4 group"
                   >
-                    <FolderPlus size={14} />
-                    <span>+ New Service</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Active Service Setlist Header & Actions */}
-              {currentService && (
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 dark:border-slate-800 pb-4">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="p-1.5 rounded-lg bg-purple-500/10 text-purple-600">
-                          <Layers size={18} />
-                        </span>
-                        <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                          {currentService.name}
-                        </h2>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                        <span>🗓 {currentService.date || 'Sunday Service'}</span>
-                        <span>•</span>
-                        <span>⏰ {currentService.time || '08:30 AM'}</span>
-                        <span>•</span>
-                        <span className="font-semibold text-purple-600">
-                          {(currentService.songs || []).length} songs in flow
-                        </span>
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setShowAddSongToSetlistModal(true)}
-                      className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-2 shadow transition-all self-start sm:self-auto"
-                    >
-                      <Plus size={16} />
-                      <span>+ Add Song to Setlist</span>
-                    </button>
-                  </div>
-
-                  {/* Setlist Songs Table/List */}
-                  {(!currentService.songs || currentService.songs.length === 0) ? (
-                    <div className="p-12 text-center border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-3xl">
-                      <Music size={32} className="mx-auto text-slate-400 mb-2" />
-                      <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                        Setlist is currently empty
-                      </p>
-                      <p className="text-[11px] text-slate-500 mt-1">
-                        Tap &quot;+ Add Song to Setlist&quot; to pick worship songs from your library.
-                      </p>
-                    </div>
-                  ) : (
+                    {/* Header Row: Index Number, Key & Theme Indicator */}
                     <div className="space-y-3">
-                      {currentService.songs.map((item, idx) => (
-                        <div
-                          key={item.id + idx}
-                          className="p-4 bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-purple-400/50 transition-all shadow-sm"
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            {/* Order Number Badge */}
-                            <div className="w-8 h-8 rounded-xl bg-purple-600 text-white font-extrabold text-xs flex items-center justify-center shrink-0 shadow-sm">
-                              {idx + 1}
-                            </div>
-
-                            <div className="space-y-1 min-w-0">
-                              <h4 className="text-sm font-bold text-slate-900 dark:text-white truncate">
-                                {item.title}
-                              </h4>
-                              {item.titleTe && (
-                                <p className="text-xs text-amber-700 dark:text-amber-400 font-serif font-medium truncate">
-                                  {item.titleTe}
-                                </p>
-                              )}
-
-                              <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
-                                <span className="px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold">
-                                  Key {item.key}
-                                </span>
-                                {item.tempo && (
-                                  <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-semibold">
-                                    {item.tempo} BPM
-                                  </span>
-                                )}
-                                {item.ledBy && (
-                                  <span className="px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 font-medium">
-                                    🎤 {item.ledBy}
-                                  </span>
-                                )}
-                                {item.prelude && (
-                                  <span className="text-slate-500">
-                                    Intro: <b className="text-slate-700 dark:text-slate-300">{item.prelude}</b>
-                                  </span>
-                                )}
-                              </div>
-                            </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5">
+                          {/* Song Index Number matching mobile card */}
+                          <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white font-extrabold text-xs flex items-center justify-center border border-slate-200 dark:border-slate-700 shadow-sm">
+                            {idx + 1}
                           </div>
 
-                          {/* Reordering & Edit Controls */}
-                          <div className="flex items-center justify-end gap-1.5 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-200 dark:border-slate-800">
-                            <button
-                              type="button"
-                              disabled={idx === 0}
-                              onClick={() => handleMoveSetlistSong(idx, 'up')}
-                              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-200 transition-colors"
-                              title="Move Up"
-                            >
-                              <ArrowUp size={13} />
-                            </button>
+                          {/* Musical Key Badge */}
+                          <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 text-[11px] font-black tracking-wider">
+                            Key {song.key || 'C'}
+                          </span>
 
-                            <button
-                              type="button"
-                              disabled={idx === currentService.songs.length - 1}
-                              onClick={() => handleMoveSetlistSong(idx, 'down')}
-                              className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 disabled:opacity-30 hover:bg-slate-200 transition-colors"
-                              title="Move Down"
-                            >
-                              <ArrowDown size={13} />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => setEditingSetlistSong({ index: idx, song: { ...item } })}
-                              className="px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 font-bold text-xs flex items-center gap-1 hover:bg-purple-100 transition-colors"
-                            >
-                              <Sliders size={12} />
-                              <span>Arrangement</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveSongFromSetlist(idx)}
-                              className="p-2 rounded-xl border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                              title="Remove from Setlist"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
+                          {/* Time Signature */}
+                          {song.timeSignature && (
+                            <span className="px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 text-[10px] font-bold">
+                              {song.timeSignature}
+                            </span>
+                          )}
                         </div>
-                      ))}
+
+                        {/* Theme Song Indicator */}
+                        {song.isThemeSong && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm">
+                            <Star size={10} className="fill-amber-500 text-amber-500" />
+                            <span>Theme Song</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Song Titles (English & Telugu) */}
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900 dark:text-white line-clamp-1 leading-snug">
+                          {song.title}
+                        </h3>
+                        {song.titleTe && (
+                          <p className="text-xs text-amber-700 dark:text-amber-400 font-serif font-medium line-clamp-1 mt-0.5">
+                            {song.titleTe}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Categories & Worship Leader */}
+                      <div className="space-y-1.5 text-xs text-slate-500 dark:text-slate-400">
+                        <p className="flex items-center gap-1.5 text-[11px]">
+                          <Mic size={12} className="text-slate-400 shrink-0" />
+                          <span className="text-slate-700 dark:text-slate-300 font-medium truncate">
+                            Led by: {song.ledBy || song.artist || 'Worship Team'}
+                          </span>
+                        </p>
+
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {(song.category ? song.category.split(';') : ['Stuthi Songs']).map(
+                            (c, i) => (
+                              <span
+                                key={i}
+                                className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-semibold"
+                              >
+                                {c.trim()}
+                              </span>
+                            )
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
-              )}
+
+                    {/* Bottom Actions Row (Exact Mobile Parity: MAKE THEME / THEME SONG + Edit / Delete) */}
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                      {/* Theme Song Toggle Button matching mobile screenshot exactly */}
+                      <button
+                        type="button"
+                        onClick={() => handleToggleThemeSong(song)}
+                        className={`px-3 py-1.5 rounded-full border text-xs font-black flex items-center gap-1.5 transition-all ${
+                          song.isThemeSong
+                            ? 'bg-amber-100 dark:bg-amber-950/40 border-amber-400 dark:border-amber-500 text-amber-800 dark:text-amber-300 shadow-sm'
+                            : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:border-amber-400 hover:text-amber-600'
+                        }`}
+                      >
+                        <Star
+                          size={12}
+                          className={song.isThemeSong ? 'fill-amber-500 text-amber-500' : 'text-slate-400'}
+                        />
+                        <span>{song.isThemeSong ? 'THEME SONG' : 'MAKE THEME'}</span>
+                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Chords & Transpose Preview */}
+                        <button
+                          type="button"
+                          onClick={() => openChordModal(song)}
+                          className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title="View Chords, Lyrics & Transposition"
+                        >
+                          <Eye size={14} />
+                        </button>
+
+                        {/* Edit Button */}
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(song)}
+                          className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title="Edit Worship Song"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+
+                        {/* Delete Button */}
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(song)}
+                          className="p-2 rounded-xl border border-red-200 dark:border-red-900/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                          title="Delete Song"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* MODAL 1: CHORD SHEET, LYRICS & REAL-TIME TRANSPOSITION */}
+          {/* MODAL 1: CHORDS & LYRICS VIEWER WITH TRANSPOSITION */}
           {/* ───────────────────────────────────────────────────────────── */}
           {chordModalSong && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in overflow-y-auto">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full p-5 sm:p-8 space-y-6 shadow-2xl relative my-auto max-h-[92vh] overflow-y-auto">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in overflow-y-auto">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl relative my-auto max-h-[90vh] overflow-y-auto">
                 {/* Header */}
-                <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-black text-xs">
-                        Original Key: {chordModalSong.key || 'G'}
-                      </span>
-                      {chordModalSong.timeSignature && (
-                        <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-xs font-bold">
-                          {chordModalSong.timeSignature}
-                        </span>
-                      )}
-                      {chordModalSong.tempo && (
-                        <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 text-xs font-bold">
-                          {chordModalSong.tempo} BPM
-                        </span>
-                      )}
-                    </div>
-
-                    <h2 className="text-xl font-bold text-slate-900 dark:text-white mt-1.5">
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">
                       {chordModalSong.title}
                     </h2>
                     {chordModalSong.titleTe && (
-                      <p className="text-sm text-amber-700 dark:text-amber-400 font-serif font-medium mt-0.5">
+                      <p className="text-xs text-amber-700 dark:text-amber-400 font-serif">
                         {chordModalSong.titleTe}
                       </p>
                     )}
@@ -1371,98 +1068,96 @@ export default function AdminSongsPage() {
                   </button>
                 </div>
 
-                {/* Real-Time Transpose Control Bar */}
-                <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-                      Transposed Key:
+                {/* Transposition Controls Row */}
+                <div className="p-4 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      Active Key (Transposed)
                     </span>
-                    <span className="px-3 py-1 rounded-xl bg-purple-600 text-white font-extrabold text-sm shadow">
-                      {currentTransposedKey}
+                    <span className="text-xl font-black text-amber-600 dark:text-amber-400">
+                      Key {currentTransposedKey}
                     </span>
                     {transposeShift !== 0 && (
-                      <span className="text-xs text-purple-600 dark:text-purple-400 font-bold">
+                      <span className="ml-2 text-xs text-slate-400">
                         ({transposeShift > 0 ? `+${transposeShift}` : transposeShift} semitones)
                       </span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setTransposeShift((prev) => prev - 1)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-bold shadow-sm hover:bg-slate-100"
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold shadow-sm"
                     >
-                      ♭ -1 Half Step
+                      -1 Semitone
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setTransposeShift(0)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-bold shadow-sm hover:bg-slate-100"
+                      disabled={transposeShift === 0}
+                      className="px-3 py-1.5 rounded-xl bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold disabled:opacity-40"
                     >
-                      Reset Key
+                      Reset
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setTransposeShift((prev) => prev + 1)}
-                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-bold shadow-sm hover:bg-slate-100"
+                      className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold shadow-sm"
                     >
-                      ♯ +1 Half Step
+                      +1 Semitone
                     </button>
                   </div>
                 </div>
 
-                {/* Lyrics & Chords Tabs */}
-                <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2">
+                {/* Chord Sheet Viewer Tabs */}
+                <div className="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-2">
                   <button
                     type="button"
                     onClick={() => setChordModalTab('chords')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
                       chordModalTab === 'chords'
-                        ? 'bg-black dark:bg-white text-white dark:text-black shadow'
-                        : 'text-slate-500 hover:text-slate-900'
+                        ? 'bg-black dark:bg-white text-white dark:text-black'
+                        : 'text-slate-500'
                     }`}
                   >
                     Chords &amp; English Lyrics
                   </button>
-
                   <button
                     type="button"
                     onClick={() => setChordModalTab('telugu')}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold ${
                       chordModalTab === 'telugu'
-                        ? 'bg-black dark:bg-white text-white dark:text-black shadow'
-                        : 'text-slate-500 hover:text-slate-900'
+                        ? 'bg-black dark:bg-white text-white dark:text-black'
+                        : 'text-slate-500'
                     }`}
                   >
                     Telugu Lyrics (తెలుగు)
                   </button>
                 </div>
 
-                {/* Content Box */}
-                <div className="p-5 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800 max-h-96 overflow-y-auto">
+                {/* Body Content */}
+                <div className="p-4 bg-slate-50/50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-2xl max-h-72 overflow-y-auto">
                   {chordModalTab === 'chords' ? (
-                    currentTransposedChords ? (
-                      <pre className="font-mono text-xs whitespace-pre-wrap leading-relaxed text-slate-800 dark:text-slate-200">
-                        {currentTransposedChords}
+                    transposedBody ? (
+                      <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap text-slate-800 dark:text-slate-200">
+                        {transposedBody}
                       </pre>
                     ) : (
                       <p className="text-xs text-slate-400 italic">
                         No chord sheet attached. You can edit this song to paste chords with lyrics (e.g. [G], [Em], [C], [D]).
                       </p>
                     )
+                  ) : chordModalSong.lyricsTe ? (
+                    <p className="text-sm font-serif leading-loose whitespace-pre-wrap text-slate-800 dark:text-slate-200">
+                      {chordModalSong.lyricsTe}
+                    </p>
                   ) : (
-                    chordModalSong.lyricsTe ? (
-                      <p className="text-sm font-serif leading-loose whitespace-pre-wrap text-slate-800 dark:text-slate-200">
-                        {chordModalSong.lyricsTe}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-slate-400 italic">
-                        No Telugu lyrics available for this song.
-                      </p>
-                    )
+                    <p className="text-xs text-slate-400 italic">
+                      No Telugu lyrics available for this song.
+                    </p>
                   )}
                 </div>
 
@@ -1470,19 +1165,27 @@ export default function AdminSongsPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Prelude</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{chordModalSong.prelude || 'Acoustic'}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {chordModalSong.prelude || 'Acoustic'}
+                    </span>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Interlude</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{chordModalSong.interlude || 'Keys + Elec'}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {chordModalSong.interlude || 'Keys + Elec'}
+                    </span>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Worship Leader</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{chordModalSong.ledBy || chordModalSong.artist || 'Worship Team'}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {chordModalSong.ledBy || chordModalSong.artist || 'Worship Team'}
+                    </span>
                   </div>
                   <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800">
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">Verses</span>
-                    <span className="font-semibold text-slate-800 dark:text-slate-200">{chordModalSong.verses || '4V'}</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {chordModalSong.verses || '4V'}
+                    </span>
                   </div>
                 </div>
 
@@ -1501,28 +1204,33 @@ export default function AdminSongsPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* MODAL 2: ADD / EDIT WORSHIP SONG (FULL MOBILE PARITY) */}
+          {/* MODAL 2: ADD / EDIT WORSHIP SONG (EXACT MOBILE APP PARITY) */}
           {/* ───────────────────────────────────────────────────────────── */}
           {editorOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in overflow-y-auto">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-8 space-y-6 shadow-2xl relative my-auto max-h-[92vh] overflow-y-auto">
+                {/* Modal Header matching mobile renderPostModal */}
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-                  <div>
-                    <span className="text-xs font-bold uppercase tracking-wider text-amber-500">
-                      {editingSongId ? 'Edit Worship Song' : 'Add New Worship Song'}
-                    </span>
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-white mt-0.5">
-                      {editingSongId ? 'Update Song Details & Arrangement' : 'Publish New Song to Library'}
-                    </h2>
-                  </div>
-
                   <button
                     type="button"
                     onClick={() => setEditorOpen(false)}
-                    className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                    className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-200 transition-colors"
                   >
-                    <X size={20} />
+                    <X size={18} />
                   </button>
+
+                  <div className="text-center">
+                    <h2 className="text-base font-extrabold text-slate-900 dark:text-white">
+                      {editingSongId ? 'Edit Worship Song' : 'Publish New Song'}
+                    </h2>
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      {editingSongId
+                        ? 'Update Song Details & Arrangement'
+                        : 'Worship Library & Setlist Charts'}
+                    </p>
+                  </div>
+
+                  <div className="w-9" />
                 </div>
 
                 {formError && (
@@ -1532,224 +1240,473 @@ export default function AdminSongsPage() {
                   </div>
                 )}
 
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleSaveSong();
-                  }}
-                  className="space-y-4"
-                >
-                  {/* Titles */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-6">
+                  {/* ── CARD 1: SONG IDENTITY & LEADER ── */}
+                  <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <Music size={16} className="text-blue-500" />
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        SONG IDENTITY &amp; LEADER
+                      </span>
+                    </div>
+
+                    {/* English Title */}
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
                         SONG TITLE (ENGLISH) <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="text"
-                        value={formTitle}
-                        onChange={(e) => setFormTitle(e.target.value)}
-                        placeholder="e.g. Sreemanthudaa Yesayya"
-                        required
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium"
+                        value={titleEn}
+                        onChange={(e) => setTitleEn(e.target.value)}
+                        placeholder="e.g. Amazing Grace, Way Maker..."
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-semibold"
                       />
                     </div>
 
+                    {/* Telugu Title */}
                     <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
                         SONG TITLE (TELUGU)
                       </label>
                       <input
                         type="text"
-                        value={formTitleTe}
-                        onChange={(e) => setFormTitleTe(e.target.value)}
-                        placeholder="e.g. శ్రీమంతుడా యేసయ్యా"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium"
+                        value={titleTe}
+                        onChange={(e) => setTitleTe(e.target.value)}
+                        placeholder="ఉదాహరణ: అద్భుతమైన కృప..."
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-semibold font-serif"
                       />
+                    </div>
+
+                    {/* YouTube Video Link */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
+                        YOUTUBE VIDEO LINK
+                      </label>
+                      <div className="flex items-center bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2">
+                        <span className="text-[11px] font-extrabold text-red-600 mr-2 flex items-center gap-1">
+                          ▶ YouTube
+                        </span>
+                        <input
+                          type="text"
+                          value={youtubeId}
+                          onChange={(e) => setYoutubeId(e.target.value)}
+                          placeholder="https://youtu.be/... or Video ID"
+                          className="flex-1 bg-transparent text-xs text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                        {youtubeId.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setYoutubeId('')}
+                            className="text-slate-400 hover:text-slate-600"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Artist / Band (Optional) */}
+                    <div>
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400 mb-1.5">
+                        ARTIST / BAND (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        value={artist}
+                        onChange={(e) => setArtist(e.target.value)}
+                        placeholder="e.g. Hillsong, Bethel, Local Choir..."
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-semibold"
+                      />
+                    </div>
+
+                    {/* Song Leading Person with Search & Autocomplete */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          SONG LEADING PERSON
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowMemberPickerModal(true)}
+                          className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-600 dark:text-blue-400 text-[10px] font-bold flex items-center gap-1 hover:bg-blue-100"
+                        >
+                          <Users size={11} />
+                          <span>Browse Directory</span>
+                        </button>
+                      </div>
+
+                      {postLedBy ? (
+                        /* Selected Leader Card */
+                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">
+                              {postLedBy.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 block">
+                                {postLedBy}
+                              </span>
+                              <span className="text-[10px] text-emerald-600 font-medium">
+                                🎤 Designated Song Leader
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPostLedBy('');
+                              setPostLeaderSearch('');
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 text-[11px] font-bold"
+                          >
+                            Change
+                          </button>
+                        </div>
+                      ) : (
+                        /* Search Leader Input */
+                        <div className="relative">
+                          <div className="flex items-center bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2.5">
+                            <Search size={14} className="text-blue-500 mr-2" />
+                            <input
+                              type="text"
+                              value={postLeaderSearch}
+                              onChange={(e) => setPostLeaderSearch(e.target.value)}
+                              placeholder="Type member name or leader to search..."
+                              className="flex-1 bg-transparent text-xs text-slate-900 dark:text-white font-medium focus:outline-none"
+                            />
+                            {postLeaderSearch.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setPostLeaderSearch('')}
+                                className="text-slate-400 hover:text-slate-600"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Autocomplete Dropdown */}
+                          {postLeaderSearch.trim().length > 0 && (
+                            <div className="absolute left-0 right-0 top-full mt-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl max-h-48 overflow-y-auto z-20 divide-y divide-slate-100 dark:divide-slate-800">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPostLedBy(postLeaderSearch.trim());
+                                  setPostLeaderSearch('');
+                                }}
+                                className="w-full text-left p-2.5 hover:bg-blue-50 dark:hover:bg-blue-950/40 text-xs font-bold text-blue-600 flex items-center justify-between"
+                              >
+                                <span>Use: &quot;{postLeaderSearch.trim()}&quot;</span>
+                                <Check size={13} />
+                              </button>
+
+                              {churchMembers
+                                .filter((m) =>
+                                  m.name.toLowerCase().includes(postLeaderSearch.toLowerCase())
+                                )
+                                .slice(0, 5)
+                                .map((m) => (
+                                  <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setPostLedBy(m.name);
+                                      setPostLeaderSearch('');
+                                    }}
+                                    className="w-full text-left p-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-xs flex items-center justify-between"
+                                  >
+                                    <div>
+                                      <span className="font-semibold text-slate-900 dark:text-white block">
+                                        {m.name}
+                                      </span>
+                                      {m.phone && (
+                                        <span className="text-[10px] text-slate-400">{m.phone}</span>
+                                      )}
+                                    </div>
+                                    <span className="text-[11px] font-bold text-blue-500">Select</span>
+                                  </button>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {/* Worship Leader & Musical Key */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                        WORSHIP LEADER / ARTIST
-                      </label>
-                      <input
-                        type="text"
-                        value={formLedBy}
-                        onChange={(e) => {
-                          setFormLedBy(e.target.value);
-                          setFormArtist(e.target.value);
-                        }}
-                        placeholder="e.g. Dr.Blessy / Worship Team"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium"
-                      />
+                  {/* ── CARD 2: MUSICAL ARRANGEMENT & BAND FLOW ── */}
+                  <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <Sliders size={16} className="text-amber-500" />
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        MUSICAL ARRANGEMENT &amp; BAND FLOW
+                      </span>
                     </div>
 
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                        ORIGINAL MUSICAL KEY <span className="text-red-500">*</span>
-                      </label>
-                      <select
-                        value={formKey}
-                        onChange={(e) => setFormKey(e.target.value)}
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white font-medium"
-                      >
-                        <optgroup label="Major Keys">
-                          {CHROMATIC_KEYS.map((k) => (
-                            <option key={k} value={k}>
-                              Key {k}
-                            </option>
-                          ))}
-                        </optgroup>
-                        <optgroup label="Minor Keys">
-                          {MINOR_KEYS.map((k) => (
-                            <option key={k} value={k}>
-                              Key {k}
-                            </option>
-                          ))}
-                        </optgroup>
-                      </select>
-                    </div>
-                  </div>
+                    {/* 4 Aligned Columns: KEY, TIME SIG, TEMPO, VERSES */}
+                    <div className="grid grid-cols-4 gap-2.5">
+                      {/* KEY */}
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          KEY
+                        </label>
+                        <select
+                          value={songKey}
+                          onChange={(e) => setSongKey(e.target.value)}
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2 py-2 text-xs font-extrabold text-blue-600 dark:text-blue-400 text-center"
+                        >
+                          <optgroup label="Major Keys">
+                            {CHROMATIC_KEYS.map((k) => (
+                              <option key={k} value={k}>
+                                Key {k}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Minor Keys">
+                            {MINOR_KEYS.map((k) => (
+                              <option key={k} value={k}>
+                                Key {k}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </select>
+                      </div>
 
-                  {/* Tempo, Time Signature & Verses */}
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                        TEMPO (BPM)
-                      </label>
-                      <input
-                        type="text"
-                        value={formTempo}
-                        onChange={(e) => setFormTempo(e.target.value)}
-                        placeholder="72"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs"
-                      />
+                      {/* TIME SIG */}
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          TIME SIG
+                        </label>
+                        <input
+                          type="text"
+                          value={timeSignature}
+                          onChange={(e) => setTimeSignature(e.target.value)}
+                          placeholder="4/4"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2 py-2 text-xs font-semibold text-center"
+                        />
+                      </div>
+
+                      {/* TEMPO WITH BPM BADGE */}
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          TEMPO
+                        </label>
+                        <div className="flex items-center bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2 py-2">
+                          <input
+                            type="text"
+                            value={tempo}
+                            onChange={(e) => setTempo(e.target.value)}
+                            placeholder="100"
+                            className="w-full bg-transparent text-xs font-bold text-center focus:outline-none"
+                          />
+                          <span className="text-[8px] font-black text-slate-400">BPM</span>
+                        </div>
+                      </div>
+
+                      {/* VERSES */}
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          VERSES
+                        </label>
+                        <input
+                          type="text"
+                          value={verses}
+                          onChange={(e) => setVerses(e.target.value)}
+                          placeholder="4V"
+                          className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-2 py-2 text-xs font-semibold text-center"
+                        />
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                        TIME SIGNATURE
-                      </label>
-                      <input
-                        type="text"
-                        value={formTimeSig}
-                        onChange={(e) => setFormTimeSig(e.target.value)}
-                        placeholder="4/4"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1">
-                        VERSES COUNT
-                      </label>
-                      <input
-                        type="text"
-                        value={formVerses}
-                        onChange={(e) => setFormVerses(e.target.value)}
-                        placeholder="4V"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3 py-2 text-xs"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Categories Multi-Select Chips */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                      SONG CATEGORIES <span className="text-red-500">*</span>
-                    </label>
-                    <div className="flex flex-wrap gap-1.5 p-3 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200 dark:border-slate-800">
-                      {CANONICAL_SONG_CATEGORIES.filter((c) => c !== 'All' && c !== 'Theme Songs').map((cat) => {
-                        const isChecked = formCategories.includes(cat);
+                    {/* Quick Tempo Presets Ribbon */}
+                    <div className="flex items-center gap-2 pt-1 overflow-x-auto">
+                      <span className="text-[9px] font-black text-slate-400 uppercase shrink-0">
+                        TEMPO:
+                      </span>
+                      {TEMPO_SUGGESTIONS.map((p) => {
+                        const isSel = tempo === p.val;
                         return (
                           <button
-                            key={cat}
+                            key={p.val}
                             type="button"
-                            onClick={() => toggleFormCategory(cat)}
-                            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all flex items-center gap-1 ${
-                              isChecked
-                                ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
-                                : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800'
+                            onClick={() => setTempo(p.val)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all shrink-0 ${
+                              isSel
+                                ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900'
+                                : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
                             }`}
                           >
-                            <span>{cat}</span>
-                            {isChecked && <Check size={11} strokeWidth={3} />}
+                            {p.label}
                           </button>
                         );
                       })}
                     </div>
-                  </div>
 
-                  {/* Prelude & Interlude Arrangements */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                        PRELUDE / INTRO ARRANGEMENT
+                    {/* Prelude Instruments */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                        PRELUDE INSTRUMENTS
                       </label>
                       <input
                         type="text"
-                        value={formPrelude}
-                        onChange={(e) => setFormPrelude(e.target.value)}
+                        value={prelude}
+                        onChange={(e) => setPrelude(e.target.value)}
                         placeholder="e.g. Acoustic + Drum"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 text-xs"
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 text-xs font-medium"
                       />
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {PRELUDE_SUGGESTIONS.map((sug) => (
+                          <button
+                            key={sug}
+                            type="button"
+                            onClick={() => setPrelude(sug)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                              prelude === sug
+                                ? 'bg-teal-600 text-white border-teal-600'
+                                : 'bg-teal-50 dark:bg-teal-950/40 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-900'
+                            }`}
+                          >
+                            {sug}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                    {/* Interlude Arrangement */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
                         INTERLUDE ARRANGEMENT
                       </label>
                       <input
                         type="text"
-                        value={formInterlude}
-                        onChange={(e) => setFormInterlude(e.target.value)}
-                        placeholder="e.g. Keys + Elec (Alt)"
-                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 text-xs"
+                        value={interlude}
+                        onChange={(e) => setInterlude(e.target.value)}
+                        placeholder="e.g. Keys + Elec"
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2 text-xs font-medium"
                       />
-                    </div>
-                  </div>
-
-                  {/* YouTube Link */}
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
-                      YOUTUBE VIDEO OR AUDIO TRACK URL
-                    </label>
-                    <input
-                      type="text"
-                      value={formYoutubeUrl}
-                      onChange={(e) => setFormYoutubeUrl(e.target.value)}
-                      placeholder="https://youtube.com/watch?v=..."
-                      className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-medium"
-                    />
-                  </div>
-
-                  {/* Theme Song Checkbox */}
-                  <div className="p-3.5 bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl flex items-center justify-between cursor-pointer"
-                    onClick={() => setFormIsThemeSong(!formIsThemeSong)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Star size={18} className={formIsThemeSong ? 'fill-amber-500 text-amber-500' : 'text-amber-500'} />
-                      <div>
-                        <span className="text-xs font-bold text-slate-900 dark:text-white block">
-                          Mark as Church Theme Song
-                        </span>
-                        <span className="text-[10px] text-slate-500">
-                          Highlights this song in the mobile app Theme Songs tab
-                        </span>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {INTERLUDE_SUGGESTIONS.map((sug) => (
+                          <button
+                            key={sug}
+                            type="button"
+                            onClick={() => setInterlude(sug)}
+                            className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border ${
+                              interlude === sug
+                                ? 'bg-blue-600 text-white border-blue-600'
+                                : 'bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-900'
+                            }`}
+                          >
+                            {sug}
+                          </button>
+                        ))}
                       </div>
                     </div>
-                    <div className={`w-5 h-5 rounded-md flex items-center justify-center border ${formIsThemeSong ? 'bg-amber-500 border-amber-500 text-white' : 'border-slate-300'}`}>
-                      {formIsThemeSong && <Check size={12} strokeWidth={3} />}
+
+                    {/* Worship & Thematic Notes */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          WORSHIP &amp; THEMATIC NOTES
+                        </label>
+                        {notes && (
+                          <button
+                            type="button"
+                            onClick={() => setNotes('')}
+                            className="text-[10px] font-bold text-red-500 hover:text-red-600"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <textarea
+                        rows={2}
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="e.g. Celebrate God's power, grace and praise..."
+                        className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl p-3 text-xs font-medium"
+                      />
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {NOTES_SUGGESTIONS.map((sug) => {
+                          const isAdded = notes.includes(sug);
+                          return (
+                            <button
+                              key={sug}
+                              type="button"
+                              onClick={() => {
+                                if (!notes.trim()) setNotes(sug);
+                                else if (!notes.includes(sug)) setNotes(`${notes} • ${sug}`);
+                              }}
+                              className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-all ${
+                                isAdded
+                                  ? 'bg-amber-500 text-white border-amber-500'
+                                  : 'bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900/40'
+                              }`}
+                            >
+                              {isAdded ? '✓ ' : '+ '}
+                              {sug}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
-                  {/* Lyrics & Chords Tabs */}
-                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                  {/* ── CARD 3: CATEGORIES, LYRICS & PUBLISH STATUS ── */}
+                  <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                        CATEGORIES &amp; THEMES
+                      </span>
+                      <span className="text-[10px] font-bold text-slate-400">
+                        {categories.length} Selected
+                      </span>
+                    </div>
+
+                    {/* Category Selection Chips matching mobile exactly */}
+                    <div className="flex flex-wrap gap-2">
+                      {CANONICAL_SONG_CATEGORIES.filter((c) => c !== 'All').map((cat) => {
+                        const isSelected = categories.includes(cat);
+                        const isThemeCat = cat === 'Theme Songs';
+
+                        return (
+                          <button
+                            key={cat}
+                            type="button"
+                            onClick={() => toggleCategory(cat)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all flex items-center gap-1.5 ${
+                              isSelected
+                                ? isThemeCat
+                                  ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                                  : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-sm'
+                                : 'bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-800 hover:border-slate-300'
+                            }`}
+                          >
+                            {isThemeCat && (
+                              <Star
+                                size={12}
+                                className={isSelected ? 'fill-white text-white' : 'text-amber-500'}
+                              />
+                            )}
+                            <span>{cat}</span>
+                            {isSelected && !isThemeCat && <Check size={12} strokeWidth={3} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Song Lyrics & Scripts */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                          SONG LYRICS &amp; SCRIPTS <span className="text-red-500">*</span>
+                        </label>
+                        <span className="text-[10px] text-slate-400">
+                          Format inline chords with brackets e.g. [G], [Em], [C], [D]
+                        </span>
+                      </div>
+
+                      {/* Language Tabs */}
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => setEditorLyricTab('en')}
@@ -1772,251 +1729,198 @@ export default function AdminSongsPage() {
                         >
                           Telugu Lyrics (తెలుగు)
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditorLyricTab('hi')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                            editorLyricTab === 'hi'
+                              ? 'bg-black dark:bg-white text-white dark:text-black'
+                              : 'text-slate-500'
+                          }`}
+                        >
+                          Hindi Lyrics
+                        </button>
                       </div>
 
                       {editorLyricTab === 'en' && (
-                        <span className="text-[10px] text-slate-400">
-                          Format inline chords with brackets e.g. [G], [Em], [C], [D]
-                        </span>
+                        <textarea
+                          rows={8}
+                          value={lyrics}
+                          onChange={(e) => setLyrics(e.target.value)}
+                          placeholder={`Verse 1:\n[G]Amazing grace! How sweet the sound...\n\nChorus:\n[C]My chains are gone, I've been set free...`}
+                          className="w-full font-mono text-xs p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500/50 leading-relaxed"
+                        />
+                      )}
+
+                      {editorLyricTab === 'te' && (
+                        <textarea
+                          rows={8}
+                          value={lyricsTe}
+                          onChange={(e) => setLyricsTe(e.target.value)}
+                          placeholder="అర్హత లేకున్నా ప్రేమించావు...&#10;నా స్తుతి పాత్రుడా యేసయ్యా..."
+                          className="w-full font-serif text-sm p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500/50 leading-loose"
+                        />
+                      )}
+
+                      {editorLyricTab === 'hi' && (
+                        <textarea
+                          rows={8}
+                          value={lyricsHi}
+                          onChange={(e) => setLyricsHi(e.target.value)}
+                          placeholder="तू ही मेरी जिंदगी, तू ही मेरा आसरा..."
+                          className="w-full text-sm p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl focus:outline-none focus:ring-2 focus:ring-amber-500/50 leading-loose"
+                        />
                       )}
                     </div>
 
-                    {editorLyricTab === 'en' ? (
-                      <textarea
-                        rows={7}
-                        value={formLyricsEn}
-                        onChange={(e) => setFormLyricsEn(e.target.value)}
-                        placeholder="[G]Arhatha lekunna [Em]preminchavu&#10;[C]Naa sthuthi paathruda [D]Yesayya..."
-                        className="w-full font-mono text-xs p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl"
-                      />
-                    ) : (
-                      <textarea
-                        rows={7}
-                        value={formLyricsTe}
-                        onChange={(e) => setFormLyricsTe(e.target.value)}
-                        placeholder="అర్హత లేకున్నా ప్రేమించావు...&#10;నా స్తుతి పాత్రుడా యేసయ్యా..."
-                        className="w-full font-serif text-sm p-3.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-2xl leading-relaxed"
-                      />
-                    )}
+                    {/* Publish Status Toggle */}
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-slate-900 dark:text-white block">
+                          Publish Status
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          {status === 'published'
+                            ? 'Visible in church library'
+                            : 'Saved as private draft'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setStatus('published')}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                            status === 'published'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          Published
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStatus('draft')}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                            status === 'draft'
+                              ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow'
+                              : 'bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-800'
+                          }`}
+                        >
+                          Draft
+                        </button>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Action Buttons */}
-                  <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                  {/* Bottom Save Action Button */}
+                  <div className="pt-2">
                     <button
                       type="button"
                       disabled={formSubmitting}
                       onClick={handleSaveSong}
-                      className="w-full py-3.5 px-4 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-lg transition-all"
+                      className="w-full py-3.5 rounded-full bg-black dark:bg-white text-white dark:text-black font-extrabold text-sm flex items-center justify-center gap-2 shadow-xl hover:opacity-95 transition-all disabled:opacity-50"
                     >
                       {formSubmitting ? (
                         <RefreshCw size={16} className="animate-spin" />
                       ) : (
-                        <CheckCircle2 size={16} />
+                        <>
+                          <Music size={16} />
+                          <span>
+                            {editingSongId
+                              ? 'Save Changes to Worship Song'
+                              : 'Publish Song to Church Library'}
+                          </span>
+                        </>
                       )}
-                      <span>{editingSongId ? 'Update Song Details' : 'Publish Song to Library'}</span>
                     </button>
-
-                    <div className="text-center pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setEditorOpen(false)}
-                        className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 font-semibold"
-                      >
-                        ← Cancel
-                      </button>
-                    </div>
                   </div>
-                </form>
+                </div>
               </div>
             </div>
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* MODAL 3: ADD SONG TO SETLIST PICKER */}
+          {/* MODAL 3: BROWSE DIRECTORY MEMBER PICKER MODAL */}
           {/* ───────────────────────────────────────────────────────────── */}
-          {showAddSongToSetlistModal && (
+          {showMemberPickerModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                  <div>
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <Users size={18} className="text-blue-500" />
                     <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Add Song to {currentService?.name}
+                      Church Members Directory
                     </h3>
-                    <p className="text-[11px] text-slate-400">Select any song from your Church Song Library</p>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setShowAddSongToSetlistModal(false)}
-                    className="text-slate-400 hover:text-slate-600"
+                    onClick={() => setShowMemberPickerModal(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-slate-600"
                   >
-                    <X size={16} />
+                    <X size={18} />
                   </button>
                 </div>
 
                 <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <Search
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
                   <input
                     type="text"
-                    placeholder="Filter songs by title..."
-                    value={setlistSearchQuery}
-                    onChange={(e) => setSetlistSearchQuery(e.target.value)}
+                    value={memberDirectorySearch}
+                    onChange={(e) => setMemberDirectorySearch(e.target.value)}
+                    placeholder="Search by member name or phone..."
                     className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-xs"
                   />
                 </div>
 
-                <div className="max-h-72 overflow-y-auto space-y-2">
-                  {songs
-                    .filter((s) => {
-                      if (!setlistSearchQuery) return true;
-                      const q = setlistSearchQuery.toLowerCase();
-                      return (
-                        s.title.toLowerCase().includes(q) ||
-                        (s.titleTe || '').toLowerCase().includes(q)
-                      );
-                    })
-                    .map((s) => (
-                      <div
-                        key={s.id}
-                        onClick={() => handleAddSongToSetlist(s)}
-                        className="p-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:border-purple-500/60 bg-slate-50/50 dark:bg-slate-950/40 hover:bg-purple-50/50 cursor-pointer transition-all flex items-center justify-between"
+                <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-2xl">
+                  {churchMembers
+                    .filter((m) =>
+                      m.name.toLowerCase().includes(memberDirectorySearch.toLowerCase())
+                    )
+                    .map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => {
+                          setPostLedBy(m.name);
+                          setShowMemberPickerModal(false);
+                        }}
+                        className="w-full text-left p-3 hover:bg-slate-50 dark:hover:bg-slate-800/60 text-xs flex items-center justify-between transition-colors"
                       >
-                        <div>
-                          <p className="text-xs font-bold text-slate-900 dark:text-white">{s.title}</p>
-                          {s.titleTe && <p className="text-[11px] text-amber-700 font-serif">{s.titleTe}</p>}
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold text-[11px] flex items-center justify-center">
+                            {m.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <span className="font-bold text-slate-900 dark:text-white block">
+                              {m.name}
+                            </span>
+                            {m.phone && (
+                              <span className="text-[10px] text-slate-400">{m.phone}</span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-700">
-                            Key {s.key}
-                          </span>
-                          <Plus size={14} className="text-purple-600" />
-                        </div>
-                      </div>
+                        <span className="text-[11px] font-bold text-blue-600">Select</span>
+                      </button>
                     ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ───────────────────────────────────────────────────────────── */}
-          {/* MODAL 4: EDIT SETLIST SONG ARRANGEMENT */}
-          {/* ───────────────────────────────────────────────────────────── */}
-          {editingSetlistSong && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-                <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Service Arrangement
-                    </h3>
-                    <p className="text-xs font-semibold text-purple-600">{editingSetlistSong.song.title}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditingSetlistSong(null)}
-                    className="text-slate-400 hover:text-slate-600"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Service Key</label>
-                    <select
-                      value={editingSetlistSong.song.key}
-                      onChange={(e) =>
-                        setEditingSetlistSong({
-                          ...editingSetlistSong,
-                          song: { ...editingSetlistSong.song, key: e.target.value },
-                        })
-                      }
-                      className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 font-bold"
-                    >
-                      {ALL_MUSICAL_KEYS.map((k) => (
-                        <option key={k} value={k}>
-                          Key {k}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tempo (BPM)</label>
-                      <input
-                        type="text"
-                        value={editingSetlistSong.song.tempo || ''}
-                        onChange={(e) =>
-                          setEditingSetlistSong({
-                            ...editingSetlistSong,
-                            song: { ...editingSetlistSong.song, tempo: e.target.value },
-                          })
-                        }
-                        className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                      />
+                  {churchMembers.length === 0 && (
+                    <div className="p-6 text-center text-xs text-slate-400">
+                      No members found in directory.
                     </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Vocalist / Led By</label>
-                      <input
-                        type="text"
-                        value={editingSetlistSong.song.ledBy || ''}
-                        onChange={(e) =>
-                          setEditingSetlistSong({
-                            ...editingSetlistSong,
-                            song: { ...editingSetlistSong.song, ledBy: e.target.value },
-                          })
-                        }
-                        className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Intro / Prelude</label>
-                    <input
-                      type="text"
-                      value={editingSetlistSong.song.prelude || ''}
-                      onChange={(e) =>
-                        setEditingSetlistSong({
-                          ...editingSetlistSong,
-                          song: { ...editingSetlistSong.song, prelude: e.target.value },
-                        })
-                      }
-                      className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Band Notes</label>
-                    <textarea
-                      rows={2}
-                      value={editingSetlistSong.song.notes || ''}
-                      onChange={(e) =>
-                        setEditingSetlistSong({
-                          ...editingSetlistSong,
-                          song: { ...editingSetlistSong.song, notes: e.target.value },
-                        })
-                      }
-                      placeholder="e.g. Acoustic solo first, full band drops on chorus 2"
-                      className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                    />
-                  </div>
+                  )}
                 </div>
 
-                <div className="flex justify-end gap-2 pt-2">
+                <div className="flex justify-end pt-2">
                   <button
                     type="button"
-                    onClick={() => setEditingSetlistSong(null)}
-                    className="px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-500"
+                    onClick={() => setShowMemberPickerModal(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveSetlistSongEdit}
-                    className="px-4 py-1.5 rounded-xl bg-purple-600 text-white font-bold text-xs hover:bg-purple-700 shadow"
-                  >
-                    Save Arrangement
+                    Close
                   </button>
                 </div>
               </div>
@@ -2024,87 +1928,7 @@ export default function AdminSongsPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────── */}
-          {/* MODAL 5: NEW SERVICE SETLIST MODAL */}
-          {/* ───────────────────────────────────────────────────────────── */}
-          {showAddServiceModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Create New Service Setlist
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddServiceModal(false)}
-                    className="text-slate-400 hover:text-slate-600"
-                  >
-                    <X size={16} />
-                  </button>
-                </div>
-
-                <div className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                      Service Name
-                    </label>
-                    <input
-                      type="text"
-                      value={newServiceName}
-                      onChange={(e) => setNewServiceName(e.target.value)}
-                      placeholder="e.g. Sunday Evening Service"
-                      className="w-full p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                        Date
-                      </label>
-                      <input
-                        type="date"
-                        value={newServiceDate}
-                        onChange={(e) => setNewServiceDate(e.target.value)}
-                        className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">
-                        Time
-                      </label>
-                      <input
-                        type="text"
-                        value={newServiceTime}
-                        onChange={(e) => setNewServiceTime(e.target.value)}
-                        placeholder="08:30 AM"
-                        className="w-full p-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddServiceModal(false)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-500"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleCreateService}
-                    className="px-4 py-1.5 rounded-xl bg-purple-600 text-white font-bold text-xs hover:bg-purple-700 shadow"
-                  >
-                    Create Service
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ───────────────────────────────────────────────────────────── */}
-          {/* MODAL 6: DELETE CONFIRMATION */}
+          {/* MODAL 4: DELETE CONFIRMATION */}
           {/* ───────────────────────────────────────────────────────────── */}
           {deleteTarget && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
@@ -2121,20 +1945,19 @@ export default function AdminSongsPage() {
                   </div>
                 </div>
 
-                <p className="text-xs text-slate-600 dark:text-slate-300">
+                <p className="text-xs text-slate-600 dark:text-slate-400">
                   Are you sure you want to delete{' '}
                   <span className="font-bold text-slate-900 dark:text-white">
                     &quot;{deleteTarget.title}&quot;
                   </span>
-                  ? This will remove it from the church songbook.
+                  ? This action will remove the song from the church catalog and cannot be undone.
                 </p>
 
                 <div className="flex items-center justify-end gap-2 pt-2">
                   <button
                     type="button"
-                    disabled={deleteSubmitting}
                     onClick={() => setDeleteTarget(null)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-500"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     Cancel
                   </button>
@@ -2142,9 +1965,13 @@ export default function AdminSongsPage() {
                     type="button"
                     disabled={deleteSubmitting}
                     onClick={handleDeleteSong}
-                    className="px-4 py-1.5 rounded-xl bg-red-600 text-white font-bold text-xs hover:bg-red-700 shadow-sm flex items-center gap-1.5"
+                    className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs shadow-md transition-all disabled:opacity-50 flex items-center gap-1.5"
                   >
-                    {deleteSubmitting ? <RefreshCw size={14} className="animate-spin" /> : null}
+                    {deleteSubmitting ? (
+                      <RefreshCw size={14} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
                     <span>Delete Permanently</span>
                   </button>
                 </div>
