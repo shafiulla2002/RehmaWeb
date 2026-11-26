@@ -43,19 +43,69 @@ import {
   FileSpreadsheet,
   Award,
   Save,
+  Heart,
+  Droplets,
+  Cake,
 } from 'lucide-react';
 
-export interface FirebaseMemberRecord {
+const ALL_CHURCH_SKILLS: string[] = [
+  'Worship Leader',
+  'Vocalist / Singer',
+  'Acoustic Guitar',
+  'Electric Guitar',
+  'Bass Guitar',
+  'Keyboard / Piano',
+  'Drums / Percussion',
+  'Choir / Harmonies',
+  'Violin / Strings',
+  'Flute / Woodwinds',
+  'Sound Engineer (FOH)',
+  'Stage Audio / Monitors',
+  'Live Streaming / Broadcast',
+  'Media / Lyrics Projection',
+  'Video Camera Operator',
+  'Video Director / Mixer',
+  'Photographer',
+  'Video Editor',
+  'Graphic Designer',
+  'Social Media Coordinator',
+  'Lighting Technician',
+  'Preacher / Evangelist',
+  'Bible Study Teacher',
+  'Sunday School Teacher',
+  'Youth Ministry Leader',
+  'Children Ministry Helper',
+  'Intercessory Prayer Leader',
+  'Pastoral Care & Counseling',
+  'Women’s Fellowship Leader',
+  'Men’s Fellowship Leader',
+  'Outreach / Visitation Team',
+  'Usher / Greeter',
+  'Food & Hospitality (FMH)',
+  'Communion Preparation',
+  'Event Coordinator / Planner',
+  'Stage Decoration / Setup',
+  'Driver / Transportation',
+  'Facilities & Maintenance',
+  'Administration / Finance',
+  'Medical / First Aid',
+  'Security / Parking',
+];
+
+interface FirebaseMemberRecord {
   id: string;
   name?: string;
   fullName?: string;
+  displayName?: string;
   firstName?: string;
   lastName?: string;
   phone?: string;
+  normalizedPhone10?: string;
   email?: string;
   gender?: string;
   dob?: string;
   city?: string;
+  village?: string;
   mailingCity?: string;
   state?: string;
   zone?: string;
@@ -68,6 +118,12 @@ export interface FirebaseMemberRecord {
   role?: string;
   status?: string;
   accountStatus?: string;
+  baptismDate?: string;
+  Baptism_Date__c?: string;
+  anniversaryDate?: string;
+  Anniversary_Date__c?: string;
+  primarySkill?: string;
+  secondarySkill?: string;
   joinDate?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -77,7 +133,7 @@ export interface FirebaseMemberRecord {
   familyRole?: string;
 }
 
-export interface FirebaseRegistrationRequest {
+interface FirebaseRegistrationRequest {
   id: string;
   authUid?: string;
   phone: string;
@@ -130,15 +186,20 @@ export default function MembersCrmAdminPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Edit / Add Member Modal
+  // Edit / Add Member Modal (Exact Mobile Field Parity)
   const [editMemberModalOpen, setEditMemberModalOpen] = useState(false);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [memberFormName, setMemberFormName] = useState('');
   const [memberFormPhone, setMemberFormPhone] = useState('');
   const [memberFormEmail, setMemberFormEmail] = useState('');
-  const [memberFormCity, setMemberFormCity] = useState('Bangalore');
+  const [memberFormCity, setMemberFormCity] = useState('');
   const [memberFormZone, setMemberFormZone] = useState('Central Zone');
-  const [memberFormSpiritual, setMemberFormSpiritual] = useState('Baptized');
+  const [memberFormDob, setMemberFormDob] = useState('');
+  const [memberFormBaptismDate, setMemberFormBaptismDate] = useState('');
+  const [memberFormAnniversaryDate, setMemberFormAnniversaryDate] = useState('');
+  const [memberFormPrimarySkill, setMemberFormPrimarySkill] = useState('');
+  const [memberFormSecondarySkill, setMemberFormSecondarySkill] = useState('');
+  const [memberFormSpiritual, setMemberFormSpiritual] = useState('Active Member');
   const [memberFormRole, setMemberFormRole] = useState('Member');
   const [memberFormStatus, setMemberFormStatus] = useState('Active');
 
@@ -168,10 +229,14 @@ export default function MembersCrmAdminPage() {
             id: d.id,
             name: data.name || data.fullName || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Church Member',
             fullName: data.fullName || data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Church Member',
+            firstName: data.firstName || '',
+            lastName: data.lastName || '',
             phone: data.phone || data.normalizedPhone10 || '',
+            normalizedPhone10: data.normalizedPhone10 || '',
             email: data.email || '',
             gender: data.gender || 'Not Specified',
-            city: data.city || data.mailingCity || '',
+            city: data.city || data.village || data.mailingCity || '',
+            village: data.village || data.city || '',
             state: data.state || data.mailingState || '',
             zone: data.zone || 'Central Zone',
             careCell: data.careCell || data.careCellName || 'Rhema Fellowship',
@@ -180,6 +245,13 @@ export default function MembersCrmAdminPage() {
             role: data.role || data.userType || 'Member',
             status: data.status || data.accountStatus || 'Active',
             accountStatus: data.accountStatus || data.status || 'Active',
+            dob: data.dob || '',
+            baptismDate: data.baptismDate || data.Baptism_Date__c || '',
+            Baptism_Date__c: data.Baptism_Date__c || data.baptismDate || '',
+            anniversaryDate: data.anniversaryDate || data.Anniversary_Date__c || '',
+            Anniversary_Date__c: data.Anniversary_Date__c || data.anniversaryDate || '',
+            primarySkill: data.primarySkill || '',
+            secondarySkill: data.secondarySkill || '',
             joinDate: data.joinDate || data.createdAt || '',
             memberCode: data.memberCode || `RHM-${d.id.substring(0, 6).toUpperCase()}`,
             familyRole: data.familyRole || 'Head of Household',
@@ -345,16 +417,21 @@ export default function MembersCrmAdminPage() {
   };
 
   // -------------------------------------------------------------
-  // MEMBER CRUD ACTIONS
+  // MEMBER CRUD ACTIONS (EXACT MOBILE APP PARITY)
   // -------------------------------------------------------------
   const handleOpenEditMember = (mem: FirebaseMemberRecord) => {
     setEditingMemberId(mem.id);
     setMemberFormName(mem.fullName || mem.name || '');
-    setMemberFormPhone(mem.phone || '');
+    setMemberFormPhone(mem.phone || mem.normalizedPhone10 || '');
     setMemberFormEmail(mem.email || '');
-    setMemberFormCity(mem.city || 'Bangalore');
+    setMemberFormCity(mem.city || mem.village || mem.mailingCity || 'Bangalore');
     setMemberFormZone(mem.zone || 'Central Zone');
-    setMemberFormSpiritual(mem.spiritualStatus || 'Baptized');
+    setMemberFormDob(mem.dob || '');
+    setMemberFormBaptismDate(mem.baptismDate || mem.Baptism_Date__c || '');
+    setMemberFormAnniversaryDate(mem.anniversaryDate || mem.Anniversary_Date__c || '');
+    setMemberFormPrimarySkill(mem.primarySkill || '');
+    setMemberFormSecondarySkill(mem.secondarySkill || '');
+    setMemberFormSpiritual(mem.spiritualStatus || 'Active Member');
     setMemberFormRole(mem.role || mem.userType || 'Member');
     setMemberFormStatus(mem.status || mem.accountStatus || 'Active');
     setEditMemberModalOpen(true);
@@ -365,9 +442,14 @@ export default function MembersCrmAdminPage() {
     setMemberFormName('');
     setMemberFormPhone('');
     setMemberFormEmail('');
-    setMemberFormCity('Bangalore');
+    setMemberFormCity('');
     setMemberFormZone('Central Zone');
-    setMemberFormSpiritual('Baptized');
+    setMemberFormDob('');
+    setMemberFormBaptismDate('');
+    setMemberFormAnniversaryDate('');
+    setMemberFormPrimarySkill('');
+    setMemberFormSecondarySkill('');
+    setMemberFormSpiritual('Active Member');
     setMemberFormRole('Member');
     setMemberFormStatus('Active');
     setEditMemberModalOpen(true);
@@ -378,6 +460,28 @@ export default function MembersCrmAdminPage() {
     if (!memberFormName.trim()) {
       alert('Please provide member full name.');
       return;
+    }
+    if (!memberFormPhone.trim()) {
+      alert('Please provide member phone number.');
+      return;
+    }
+
+    const digitsOnly = memberFormPhone.replace(/\D/g, '');
+    const last10 = digitsOnly.slice(-10);
+    const formattedPhone = digitsOnly.startsWith('91') && digitsOnly.length > 10
+      ? `+${digitsOnly}`
+      : (last10 ? `+91${last10}` : memberFormPhone.trim());
+
+    // Real-time duplicate phone validation on create (matching mobile parity)
+    if (!editingMemberId && last10) {
+      const isDuplicate = members.some((m) => {
+        const mDigits = (m.phone || m.normalizedPhone10 || '').replace(/\D/g, '').slice(-10);
+        return mDigits === last10;
+      });
+      if (isDuplicate) {
+        alert('A member with this phone number already exists in this church.');
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -416,13 +520,31 @@ export default function MembersCrmAdminPage() {
         }
       }
 
+      const trimmedName = memberFormName.trim();
+      const nameParts = trimmedName.split(/\s+/);
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
       const payload: Partial<FirebaseMemberRecord> = {
-        name: memberFormName.trim(),
-        fullName: memberFormName.trim(),
-        phone: memberFormPhone.trim(),
+        name: trimmedName,
+        fullName: trimmedName,
+        displayName: trimmedName,
+        firstName: firstName,
+        lastName: lastName,
+        phone: formattedPhone,
+        normalizedPhone10: last10,
         email: memberFormEmail.trim(),
         city: memberFormCity.trim(),
+        village: memberFormCity.trim(),
+        mailingCity: memberFormCity.trim(),
         zone: memberFormZone,
+        dob: memberFormDob || '',
+        baptismDate: memberFormBaptismDate || '',
+        Baptism_Date__c: memberFormBaptismDate || '',
+        anniversaryDate: memberFormAnniversaryDate || '',
+        Anniversary_Date__c: memberFormAnniversaryDate || '',
+        primarySkill: memberFormPrimarySkill.trim(),
+        secondarySkill: memberFormSecondarySkill.trim(),
         spiritualStatus: memberFormSpiritual,
         userType: memberFormRole,
         role: memberFormRole,
@@ -487,14 +609,35 @@ export default function MembersCrmAdminPage() {
   // EXPORT TO CSV
   // -------------------------------------------------------------
   const handleExportCSV = () => {
-    const headers = ['ID', 'Full Name', 'Phone', 'Email', 'City', 'Zone', 'Spiritual Status', 'Role', 'Status', 'Join Date'];
+    const headers = [
+      'ID',
+      'Full Name',
+      'Phone',
+      'Email',
+      'City / Village',
+      'Zone',
+      'Date of Birth',
+      'Baptism Date',
+      'Anniversary Date',
+      'Primary Skill',
+      'Secondary Skill',
+      'Spiritual Status',
+      'Role',
+      'Status',
+      'Join Date',
+    ];
     const rows = filteredMembers.map((m) => [
       `"${m.id}"`,
       `"${m.fullName || m.name || ''}"`,
       `"${m.phone || ''}"`,
       `"${m.email || ''}"`,
-      `"${m.city || ''}"`,
+      `"${m.city || m.village || ''}"`,
       `"${m.zone || ''}"`,
+      `"${m.dob || ''}"`,
+      `"${m.baptismDate || m.Baptism_Date__c || ''}"`,
+      `"${m.anniversaryDate || m.Anniversary_Date__c || ''}"`,
+      `"${m.primarySkill || ''}"`,
+      `"${m.secondarySkill || ''}"`,
       `"${m.spiritualStatus || ''}"`,
       `"${m.role || m.userType || ''}"`,
       `"${m.status || m.accountStatus || ''}"`,
@@ -513,8 +656,21 @@ export default function MembersCrmAdminPage() {
   };
 
   // -------------------------------------------------------------
-  // FILTERED DATASETS
+  // STATS & FILTERED DATASETS (EXACT MOBILE PARITY)
   // -------------------------------------------------------------
+  const stats = useMemo(() => {
+    const total = members.length;
+    const active = members.filter((m) => {
+      const st = (m.status || m.accountStatus || 'Active').toLowerCase();
+      return st === 'active';
+    }).length;
+    const inactive = members.filter((m) => {
+      const st = (m.status || m.accountStatus || '').toLowerCase();
+      return st === 'inactive';
+    }).length;
+    return { total, active, inactive };
+  }, [members]);
+
   const filteredMembers = useMemo(() => {
     return members.filter((m) => {
       const matchesSearch =
@@ -526,7 +682,9 @@ export default function MembersCrmAdminPage() {
 
       const matchesZone = selectedZone === 'All' || m.zone === selectedZone;
       const matchesSpiritual = selectedSpiritual === 'All' || m.spiritualStatus === selectedSpiritual;
-      const matchesStatus = selectedStatus === 'All' || (m.status || m.accountStatus) === selectedStatus;
+      const matchesStatus =
+        selectedStatus === 'All' ||
+        (m.status || m.accountStatus || 'Active').toLowerCase() === selectedStatus.toLowerCase();
 
       return matchesSearch && matchesZone && matchesSpiritual && matchesStatus;
     });
@@ -598,6 +756,173 @@ export default function MembersCrmAdminPage() {
               <span>{error}</span>
             </div>
           )}
+
+          {/* ─────────────────────────────────────────────────────────── */}
+          {/* THREE SUMMARY CARDS (MOBILE APP PARITY)                     */}
+          {/* ─────────────────────────────────────────────────────────── */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
+            {/* Card 1: Total Members */}
+            <button
+              type="button"
+              onClick={() => setSelectedStatus('All')}
+              className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden bg-white dark:bg-slate-900 shadow-xs flex flex-col justify-between ${
+                selectedStatus === 'All'
+                  ? 'border-[#1A2D5A] dark:border-blue-400 ring-2 ring-[#1A2D5A]/15 dark:ring-blue-400/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              {/* Top Accent Notch (Mobile Parity) */}
+              <div
+                className={`absolute top-0 left-0 right-0 transition-all ${
+                  selectedStatus === 'All'
+                    ? 'bg-[#1A2D5A] dark:bg-blue-400 h-1.5'
+                    : 'bg-[#1A2D5A]/60 dark:bg-blue-400/40 h-1'
+                }`}
+              />
+
+              <div className="pt-1">
+                <span className="text-3xl font-black tracking-tight text-[#1A2D5A] dark:text-blue-400 block font-mono">
+                  {stats.total}
+                </span>
+
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span
+                    className={`text-xs font-extrabold uppercase tracking-wider ${
+                      selectedStatus === 'All'
+                        ? 'text-[#1A2D5A] dark:text-blue-400'
+                        : 'text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    TOTAL
+                  </span>
+                  {selectedStatus === 'All' && (
+                    <span className="w-2 h-2 rounded-full bg-[#1A2D5A] dark:bg-blue-400 inline-block" />
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
+                <span
+                  className={`font-semibold ${
+                    selectedStatus === 'All'
+                      ? 'text-[#1A2D5A] dark:text-blue-400 font-bold'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {selectedStatus === 'All' ? 'Active ✓' : 'Tap to filter'}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">All Congregation</span>
+              </div>
+            </button>
+
+            {/* Card 2: Active Members */}
+            <button
+              type="button"
+              onClick={() => setSelectedStatus(selectedStatus === 'Active' ? 'All' : 'Active')}
+              className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden bg-white dark:bg-slate-900 shadow-xs flex flex-col justify-between ${
+                selectedStatus === 'Active'
+                  ? 'border-emerald-600 dark:border-emerald-400 ring-2 ring-emerald-600/15 dark:ring-emerald-400/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              {/* Top Accent Notch (Mobile Parity) */}
+              <div
+                className={`absolute top-0 left-0 right-0 transition-all ${
+                  selectedStatus === 'Active'
+                    ? 'bg-emerald-600 dark:bg-emerald-400 h-1.5'
+                    : 'bg-emerald-600/60 dark:bg-emerald-400/40 h-1'
+                }`}
+              />
+
+              <div className="pt-1">
+                <span className="text-3xl font-black tracking-tight text-emerald-600 dark:text-emerald-400 block font-mono">
+                  {stats.active}
+                </span>
+
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span
+                    className={`text-xs font-extrabold uppercase tracking-wider ${
+                      selectedStatus === 'Active'
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : 'text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    ACTIVE
+                  </span>
+                  {selectedStatus === 'Active' && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 dark:bg-emerald-400 inline-block" />
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
+                <span
+                  className={`font-semibold ${
+                    selectedStatus === 'Active'
+                      ? 'text-emerald-600 dark:text-emerald-400 font-bold'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {selectedStatus === 'Active' ? 'Active ✓' : 'Tap to filter'}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Regular Church Members</span>
+              </div>
+            </button>
+
+            {/* Card 3: Inactive Members */}
+            <button
+              type="button"
+              onClick={() => setSelectedStatus(selectedStatus === 'Inactive' ? 'All' : 'Inactive')}
+              className={`p-4 rounded-2xl border text-left transition-all cursor-pointer relative overflow-hidden bg-white dark:bg-slate-900 shadow-xs flex flex-col justify-between ${
+                selectedStatus === 'Inactive'
+                  ? 'border-red-600 dark:border-red-400 ring-2 ring-red-600/15 dark:ring-red-400/20 shadow-md'
+                  : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
+              }`}
+            >
+              {/* Top Accent Notch (Mobile Parity) */}
+              <div
+                className={`absolute top-0 left-0 right-0 transition-all ${
+                  selectedStatus === 'Inactive'
+                    ? 'bg-red-600 dark:bg-red-400 h-1.5'
+                    : 'bg-red-600/60 dark:bg-red-400/40 h-1'
+                }`}
+              />
+
+              <div className="pt-1">
+                <span className="text-3xl font-black tracking-tight text-red-600 dark:text-red-400 block font-mono">
+                  {stats.inactive}
+                </span>
+
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span
+                    className={`text-xs font-extrabold uppercase tracking-wider ${
+                      selectedStatus === 'Inactive'
+                        ? 'text-red-600 dark:text-red-400'
+                        : 'text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    INACTIVE
+                  </span>
+                  {selectedStatus === 'Inactive' && (
+                    <span className="w-2 h-2 rounded-full bg-red-600 dark:bg-red-400 inline-block" />
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-[11px]">
+                <span
+                  className={`font-semibold ${
+                    selectedStatus === 'Inactive'
+                      ? 'text-red-600 dark:text-red-400 font-bold'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {selectedStatus === 'Inactive' ? 'Active ✓' : 'Tap to filter'}
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">Inactive Profiles</span>
+              </div>
+            </button>
+          </div>
 
           {/* Primary View Tabs */}
           <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800">
@@ -1091,68 +1416,95 @@ export default function MembersCrmAdminPage() {
           {/* ─────────────────────────────────────────────────────────── */}
           {editMemberModalOpen && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-base text-slate-900 dark:text-white">
-                    {editingMemberId ? 'Edit Member Dossier' : 'Register New Member Directly'}
-                  </h3>
-                  <button onClick={() => setEditMemberModalOpen(false)} className="text-slate-400 hover:text-white">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 sm:p-8 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div>
+                    <h3 className="font-bold text-lg text-slate-900 dark:text-white">
+                      {editingMemberId ? 'Edit Member' : 'Add New Member'}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      {editingMemberId
+                        ? 'Update member details below.'
+                        : 'They will receive a shareable link to join Rhema Central Sanctuary'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setEditMemberModalOpen(false)}
+                    className="p-1.5 rounded-full text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
                     <X size={18} />
                   </button>
                 </div>
 
-                <form onSubmit={handleSaveMember} className="space-y-3 text-xs">
-                  <div>
-                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
-                      Full Legal Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={memberFormName}
-                      onChange={(e) => setMemberFormName(e.target.value)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
+                <form onSubmit={handleSaveMember} className="space-y-4 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Full Name */}
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Phone Number</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Full Name *
+                      </label>
                       <input
                         type="text"
-                        placeholder="+91..."
+                        required
+                        placeholder="Enter member's name"
+                        value={memberFormName}
+                        onChange={(e) => setMemberFormName(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
+                      />
+                    </div>
+
+                    {/* Phone Number */}
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Phone Number *
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        placeholder="e.g. 9876543210"
                         value={memberFormPhone}
                         onChange={(e) => setMemberFormPhone(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
                       />
                     </div>
+
+                    {/* Email Address */}
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Email Address
+                      </label>
                       <input
                         type="email"
+                        placeholder="member@example.com"
                         value={memberFormEmail}
                         onChange={(e) => setMemberFormEmail(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
                       />
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                    {/* City / Village */}
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">City</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        City / Village
+                      </label>
                       <input
                         type="text"
+                        placeholder="Enter city or village"
                         value={memberFormCity}
                         onChange={(e) => setMemberFormCity(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
                       />
                     </div>
+
+                    {/* Church Zone */}
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Church Zone</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Church Zone
+                      </label>
                       <select
                         value={memberFormZone}
                         onChange={(e) => setMemberFormZone(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
                       >
                         <option value="Central Zone">Central Zone</option>
                         <option value="North Zone">North Zone</option>
@@ -1160,66 +1512,185 @@ export default function MembersCrmAdminPage() {
                         <option value="East Zone">East Zone</option>
                       </select>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-3 gap-3">
+                    {/* Date of Birth (DOB) */}
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Spiritual Status</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Date of Birth (DOB)
+                      </label>
+                      <input
+                        type="date"
+                        value={memberFormDob}
+                        onChange={(e) => setMemberFormDob(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
+                      />
+                    </div>
+
+                    {/* Baptism Date */}
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Baptism Date
+                      </label>
+                      <input
+                        type="date"
+                        value={memberFormBaptismDate}
+                        onChange={(e) => setMemberFormBaptismDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
+                      />
+                    </div>
+
+                    {/* Wedding Anniversary Date */}
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Wedding Anniversary Date
+                      </label>
+                      <input
+                        type="date"
+                        value={memberFormAnniversaryDate}
+                        onChange={(e) => setMemberFormAnniversaryDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
+                      />
+                    </div>
+
+                    {/* Primary Skill */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide text-[11px]">
+                          Primary Skill
+                        </label>
+                        {memberFormPrimarySkill && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberFormPrimarySkill('')}
+                            className="text-[10px] text-red-500 hover:text-red-400 font-semibold"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        list="church-skills-list"
+                        placeholder="Select or enter primary skill"
+                        value={memberFormPrimarySkill}
+                        onChange={(e) => setMemberFormPrimarySkill(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
+                      />
+                    </div>
+
+                    {/* Secondary Skill */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide text-[11px]">
+                          Secondary Skill
+                        </label>
+                        {memberFormSecondarySkill && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberFormSecondarySkill('')}
+                            className="text-[10px] text-red-500 hover:text-red-400 font-semibold"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        list="church-skills-list"
+                        placeholder="Select or enter secondary skill"
+                        value={memberFormSecondarySkill}
+                        onChange={(e) => setMemberFormSecondarySkill(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
+                      />
+                    </div>
+
+                    {/* Spiritual Status */}
+                    <div>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Spiritual Status
+                      </label>
                       <select
                         value={memberFormSpiritual}
                         onChange={(e) => setMemberFormSpiritual(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
                       >
+                        <option value="Active Member">Active Member</option>
                         <option value="Baptized">Baptized</option>
                         <option value="Confirmed">Confirmed</option>
                         <option value="Candidate">Candidate</option>
-                        <option value="Active Member">Active Member</option>
                       </select>
                     </div>
 
+                    {/* Member Status */}
                     <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Role</label>
-                      <select
-                        value={memberFormRole}
-                        onChange={(e) => setMemberFormRole(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-bold"
-                      >
-                        <option value="Member">Member</option>
-                        <option value="Admin">Admin</option>
-                        <option value="Super Admin">Super Admin</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">Status</label>
+                      <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                        Member Status
+                      </label>
                       <select
                         value={memberFormStatus}
                         onChange={(e) => setMemberFormStatus(e.target.value)}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:border-amber-500 font-medium text-xs transition-colors"
                       >
                         <option value="Active">Active</option>
-                        <option value="Under Pastoral Care">Under Care</option>
+                        <option value="Under Pastoral Care">Under Pastoral Care</option>
                         <option value="Inactive">Inactive</option>
                       </select>
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100 dark:border-slate-800">
+                  {/* Role Selector */}
+                  <div className="pt-2">
+                    <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5 uppercase tracking-wide text-[11px]">
+                      Role
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(['Member', 'Admin', 'Super Admin'] as const).map((r) => {
+                        const isSelected = memberFormRole.toLowerCase() === r.toLowerCase();
+                        return (
+                          <button
+                            key={r}
+                            type="button"
+                            onClick={() => setMemberFormRole(r)}
+                            className={`py-2.5 px-3 rounded-xl border text-xs font-bold transition-all text-center ${
+                              isSelected
+                                ? 'bg-[#1a2d5a] dark:bg-blue-600 text-white border-[#1a2d5a] dark:border-blue-500 shadow-sm'
+                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700/60'
+                            }`}
+                          >
+                            {r}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Skills Datalist */}
+                  <datalist id="church-skills-list">
+                    {ALL_CHURCH_SKILLS.map((skill) => (
+                      <option key={skill} value={skill} />
+                    ))}
+                  </datalist>
+
+                  <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
                     <button
                       type="button"
                       onClick={() => setEditMemberModalOpen(false)}
                       disabled={isSubmitting}
-                      className="px-4 py-2 rounded-xl text-slate-500 hover:text-slate-800 dark:hover:text-white"
+                      className="px-4 py-2.5 rounded-xl text-slate-500 hover:text-slate-800 dark:hover:text-white font-medium transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-md flex items-center gap-1.5"
+                      className="px-6 py-2.5 rounded-full bg-[#1a2d5a] dark:bg-white text-white dark:text-slate-900 font-extrabold shadow-md hover:opacity-95 flex items-center gap-2 transition-all cursor-pointer"
                     >
-                      {isSubmitting ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
-                      <span>{editingMemberId ? 'Update Record' : 'Save Member'}</span>
+                      {isSubmitting ? (
+                        <RefreshCw size={15} className="animate-spin" />
+                      ) : (
+                        <Save size={15} />
+                      )}
+                      <span>{editingMemberId ? 'SAVE CHANGES' : 'ADD MEMBER'}</span>
                     </button>
                   </div>
                 </form>
@@ -1280,9 +1751,39 @@ export default function MembersCrmAdminPage() {
                     <span className="font-medium text-slate-900 dark:text-white">{selectedMember.zone || 'Central Zone'}</span>
                   </div>
                   <div className="pt-2 flex justify-between">
-                    <span className="text-slate-400">City &amp; State</span>
+                    <span className="text-slate-400">City / Village</span>
                     <span className="font-medium text-slate-900 dark:text-white">
-                      {[selectedMember.city, selectedMember.state].filter(Boolean).join(', ') || 'Bangalore'}
+                      {selectedMember.city || selectedMember.village || 'Not recorded'}
+                    </span>
+                  </div>
+                  <div className="pt-2 flex justify-between">
+                    <span className="text-slate-400">Date of Birth (DOB)</span>
+                    <span className="font-medium text-slate-900 dark:text-white">
+                      {selectedMember.dob || 'Not recorded'}
+                    </span>
+                  </div>
+                  <div className="pt-2 flex justify-between">
+                    <span className="text-slate-400">Baptism Date</span>
+                    <span className="font-medium text-slate-900 dark:text-white">
+                      {selectedMember.baptismDate || selectedMember.Baptism_Date__c || 'Not recorded'}
+                    </span>
+                  </div>
+                  <div className="pt-2 flex justify-between">
+                    <span className="text-slate-400">Wedding Anniversary</span>
+                    <span className="font-medium text-slate-900 dark:text-white">
+                      {selectedMember.anniversaryDate || selectedMember.Anniversary_Date__c || 'Not recorded'}
+                    </span>
+                  </div>
+                  <div className="pt-2 flex justify-between items-center">
+                    <span className="text-slate-400">Primary Skill</span>
+                    <span className="font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800/40 text-[11px]">
+                      {selectedMember.primarySkill || 'None'}
+                    </span>
+                  </div>
+                  <div className="pt-2 flex justify-between items-center">
+                    <span className="text-slate-400">Secondary Skill</span>
+                    <span className="font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800/40 text-[11px]">
+                      {selectedMember.secondarySkill || 'None'}
                     </span>
                   </div>
                   <div className="pt-2 flex justify-between">
