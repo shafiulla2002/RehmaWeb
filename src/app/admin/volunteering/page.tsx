@@ -435,7 +435,7 @@ export default function VolunteerManagementAdminPage() {
   };
 
   return (
-    <ProtectedRoute>
+    <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
         <div className="space-y-6 max-w-7xl mx-auto pb-12">
           {/* Header */}
