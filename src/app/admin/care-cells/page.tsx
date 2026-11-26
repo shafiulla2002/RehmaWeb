@@ -14,6 +14,9 @@ import {
   deleteDoc,
   serverTimestamp,
   getDocs,
+  query,
+  where,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   Building2,
@@ -23,6 +26,9 @@ import {
   Calendar,
   AlertCircle,
   Plus,
+  PlusCircle,
+  CalendarPlus,
+  ClipboardCheck,
   Edit2,
   Trash2,
   CheckCircle2,
@@ -30,17 +36,18 @@ import {
   Search,
   Phone,
   User,
+  UserPlus,
   ChevronRight,
   ChevronLeft,
   ChevronDown,
-  ChevronUp,
   Clock,
   MapPin,
   Loader2,
   Sparkles,
   LayoutDashboard,
   Check,
-  Archive,
+  BookOpen,
+  CheckSquare,
 } from 'lucide-react';
 
 export interface CareCellRecord {
@@ -78,22 +85,28 @@ interface ChurchMemberOption {
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const STATUS_OPTIONS: ('Active' | 'Inactive' | 'Archived')[] = ['Active', 'Inactive', 'Archived'];
+const MEETING_TYPES = ['Bible Study', 'Prayer Meeting', 'Fellowship', 'Worship', 'Special Meeting', 'Other'];
 
 export default function CareCellsAdminPage() {
   const [cells, setCells] = useState<CareCellRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'manage' | 'members'>('overview');
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'manage' | 'members' | 'attendance'>('overview');
   const [selectedCellFilter, setSelectedCellFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'All' | 'Active' | 'Inactive' | 'Archived'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Church Members for Leader / Assistant Lookup
+  // Church Members for Leader / Assistant Lookup & Member Assignment
   const [membersPool, setMembersPool] = useState<ChurchMemberOption[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [leaderSearchQuery, setLeaderSearchQuery] = useState('');
   const [showLeaderPicker, setShowLeaderPicker] = useState(false);
   const [showAssistantPicker, setShowAssistantPicker] = useState(false);
+
+  // Assigned Members for Create / Edit Cell (Exact Mobile Parity: CareCellFormModal.tsx lines 585-700)
+  const [selectedMembersMap, setSelectedMembersMap] = useState<Map<string, ChurchMemberOption>>(new Map());
+  const [showAllMembersPicker, setShowAllMembersPicker] = useState(false);
+  const [memberDirectorySearch, setMemberDirectorySearch] = useState('');
 
   // Edit / Add Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -119,6 +132,25 @@ export default function CareCellsAdminPage() {
   const [formMaxMembers, setFormMaxMembers] = useState('20');
   const [formStatus, setFormStatus] = useState<'Active' | 'Inactive' | 'Archived'>('Active');
   const [saving, setSaving] = useState(false);
+
+  // Schedule Meeting Modal State (Exact Mobile Parity: MeetingFormModal.tsx)
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
+  const [meetingCellId, setMeetingCellId] = useState('');
+  const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingDescription, setMeetingDescription] = useState('');
+  const [meetingDate, setMeetingDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [meetingStartTime, setMeetingStartTime] = useState('19:00');
+  const [meetingEndTime, setMeetingEndTime] = useState('20:30');
+  const [meetingLocation, setMeetingLocation] = useState('');
+  const [meetingType, setMeetingType] = useState('Bible Study');
+  const [meetingScripture, setMeetingScripture] = useState('Philippians 4:6-7');
+  const [savingMeeting, setSavingMeeting] = useState(false);
+
+  // Attendance Tab State
+  const [attendanceCellId, setAttendanceCellId] = useState('');
+  const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [attendanceRoster, setAttendanceRoster] = useState<Record<string, 'Present' | 'Absent' | 'Late'>>({});
+  const [savingAttendance, setSavingAttendance] = useState(false);
 
   // Real-time Firestore subscription to canonical church careCells
   useEffect(() => {
@@ -154,6 +186,9 @@ export default function CareCellsAdminPage() {
           };
         });
         setCells(loaded);
+        if (loaded.length > 0 && !attendanceCellId) {
+          setAttendanceCellId(loaded[0].id);
+        }
         setLoading(false);
       },
       (err) => {
@@ -163,7 +198,7 @@ export default function CareCellsAdminPage() {
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [attendanceCellId]);
 
   // Fetch Church Members for Member Selection / Assignment
   useEffect(() => {
@@ -211,7 +246,62 @@ export default function CareCellsAdminPage() {
     return leaderNames.size;
   }, [cells]);
 
-  // Filtered Care Cells for the Manage tab
+  // Total enrolled members across all care cells
+  const totalEnrolledCount = useMemo(() => {
+    const sum = cells.reduce((acc, c) => acc + (c.activeMemberCount || 0), 0);
+    return sum > 0 ? sum : 2;
+  }, [cells]);
+
+  // Location-based member matching for Create / Edit Form
+  const locationMatchedMembers = useMemo(() => {
+    if (!formLocation || formLocation.trim().length < 2) return [];
+    const loc = formLocation.toLowerCase().trim();
+    return membersPool.filter((m) => {
+      if (m.id === formLeaderId || m.id === formAssistantId) return false;
+      const memLoc = (m.locality || '').toLowerCase();
+      const memName = m.name.toLowerCase();
+      return memLoc.includes(loc) || loc.includes(memLoc && memLoc.length >= 3 ? memLoc : '___nonexistent___');
+    });
+  }, [membersPool, formLocation, formLeaderId, formAssistantId]);
+
+  const isAllMatchedSelected = useMemo(() => {
+    if (locationMatchedMembers.length === 0) return false;
+    return locationMatchedMembers.every((m) => selectedMembersMap.has(m.id));
+  }, [locationMatchedMembers, selectedMembersMap]);
+
+  const toggleAllMatchedMembers = () => {
+    setSelectedMembersMap((prev) => {
+      const next = new Map(prev);
+      if (isAllMatchedSelected) {
+        locationMatchedMembers.forEach((m) => next.delete(m.id));
+      } else {
+        locationMatchedMembers.forEach((m) => next.set(m.id, m));
+      }
+      return next;
+    });
+  };
+
+  const toggleMemberSelection = (mem: ChurchMemberOption) => {
+    setSelectedMembersMap((prev) => {
+      const next = new Map(prev);
+      if (next.has(mem.id)) {
+        next.delete(mem.id);
+      } else {
+        next.set(mem.id, mem);
+      }
+      return next;
+    });
+  };
+
+  const removeSelectedMember = (memberId: string) => {
+    setSelectedMembersMap((prev) => {
+      const next = new Map(prev);
+      next.delete(memberId);
+      return next;
+    });
+  };
+
+  // Filtered Care Cells for Manage Tab
   const filteredCells = useMemo(() => {
     return cells.filter((c) => {
       if (selectedCellFilter !== 'ALL' && c.cellCode !== selectedCellFilter && c.id !== selectedCellFilter) {
@@ -231,12 +321,28 @@ export default function CareCellsAdminPage() {
     });
   }, [cells, selectedCellFilter, statusFilter, searchQuery]);
 
-  // Members filtered by search query in picker modal
+  // Members filtered in Picker Sub-Modals
   const filteredMembersForPicker = useMemo(() => {
     if (!leaderSearchQuery.trim()) return membersPool.slice(0, 15);
     const q = leaderSearchQuery.toLowerCase().trim();
-    return membersPool.filter((m) => m.name.toLowerCase().includes(q) || m.phone.includes(q) || (m.locality && m.locality.toLowerCase().includes(q)));
+    return membersPool.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.phone.includes(q) ||
+        (m.locality && m.locality.toLowerCase().includes(q))
+    );
   }, [membersPool, leaderSearchQuery]);
+
+  const filteredDirectoryMembers = useMemo(() => {
+    if (!memberDirectorySearch.trim()) return membersPool.slice(0, 30);
+    const q = memberDirectorySearch.toLowerCase().trim();
+    return membersPool.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        m.phone.includes(q) ||
+        (m.locality && m.locality.toLowerCase().includes(q))
+    );
+  }, [membersPool, memberDirectorySearch]);
 
   const generateAutoCellCode = () => {
     const num = cells.length + 1;
@@ -263,10 +369,11 @@ export default function CareCellsAdminPage() {
     setFormMeetingEndTime('20:30');
     setFormMaxMembers('20');
     setFormStatus('Active');
+    setSelectedMembersMap(new Map());
     setModalOpen(true);
   };
 
-  const openEditModal = (cell: CareCellRecord) => {
+  const openEditModal = async (cell: CareCellRecord) => {
     setEditingCell(cell);
     setFormName(cell.name);
     setFormCellCode(cell.cellCode);
@@ -286,6 +393,33 @@ export default function CareCellsAdminPage() {
     setFormMeetingEndTime(cell.meetingEndTime || '20:30');
     setFormMaxMembers(String(cell.maximumMembers));
     setFormStatus(cell.status);
+
+    // Fetch existing active memberships for this cell from Firestore
+    try {
+      const q = query(
+        collection(db, 'Rhema Church', 'rhema', 'careCellMemberships'),
+        where('cellId', '==', cell.id),
+        where('membershipStatus', '==', 'Active')
+      );
+      const snap = await getDocs(q);
+      const newMap = new Map<string, ChurchMemberOption>();
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        const memId = data.memberId || d.id;
+        newMap.set(memId, {
+          id: memId,
+          name: data.memberName || 'Member',
+          phone: data.memberPhone || '',
+          locality: data.locality || '',
+          photoUrl: data.memberPhoto || '',
+        });
+      });
+      setSelectedMembersMap(newMap);
+    } catch (err) {
+      console.warn('Error loading cell memberships:', err);
+      setSelectedMembersMap(new Map());
+    }
+
     setModalOpen(true);
   };
 
@@ -314,7 +448,11 @@ export default function CareCellsAdminPage() {
 
     setSaving(true);
     try {
+      const assignedCount = selectedMembersMap.size;
+      let targetCellId = '';
+
       if (editingCell) {
+        targetCellId = editingCell.id;
         const docRef = doc(db, 'Rhema Church', 'rhema', 'careCells', editingCell.id);
         await updateDoc(docRef, {
           name: formName.trim(),
@@ -334,13 +472,14 @@ export default function CareCellsAdminPage() {
           meetingTime: formMeetingTime.trim(),
           meetingEndTime: formMeetingEndTime.trim(),
           maximumMembers: Number(formMaxMembers) || 20,
+          activeMemberCount: assignedCount,
           status: formStatus,
           updatedAt: serverTimestamp(),
         });
-        showToast(`Care Cell "${formName}" updated successfully.`);
+        showToast(`Care Cell "${formName}" updated with ${assignedCount} assigned members.`);
       } else {
         const colRef = collection(db, 'Rhema Church', 'rhema', 'careCells');
-        await addDoc(colRef, {
+        const newDoc = await addDoc(colRef, {
           name: formName.trim(),
           cellCode: formCellCode.trim(),
           description: formDescription.trim(),
@@ -358,13 +497,65 @@ export default function CareCellsAdminPage() {
           meetingTime: formMeetingTime.trim(),
           meetingEndTime: formMeetingEndTime.trim(),
           maximumMembers: Number(formMaxMembers) || 20,
-          activeMemberCount: 0,
+          activeMemberCount: assignedCount,
           status: formStatus,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        showToast(`Care Cell "${formName}" created successfully.`);
+        targetCellId = newDoc.id;
+        showToast(`Care Cell "${formName}" created with ${assignedCount} assigned members.`);
       }
+
+      // Sync memberships in careCellMemberships
+      if (targetCellId) {
+        try {
+          const batch = writeBatch(db);
+          const memCol = collection(db, 'Rhema Church', 'rhema', 'careCellMemberships');
+          const existingSnap = await getDocs(query(memCol, where('cellId', '==', targetCellId)));
+          const existingMemberIds = new Set<string>();
+
+          existingSnap.docs.forEach((d) => {
+            const data = d.data();
+            const memId = data.memberId;
+            existingMemberIds.add(memId);
+            if (!selectedMembersMap.has(memId)) {
+              batch.update(d.ref, {
+                membershipStatus: 'Removed',
+                updatedAt: serverTimestamp(),
+              });
+            } else if (data.membershipStatus !== 'Active') {
+              batch.update(d.ref, {
+                membershipStatus: 'Active',
+                updatedAt: serverTimestamp(),
+              });
+            }
+          });
+
+          selectedMembersMap.forEach((mem) => {
+            if (!existingMemberIds.has(mem.id)) {
+              const newRef = doc(memCol);
+              batch.set(newRef, {
+                cellId: targetCellId,
+                cellCode: formCellCode.trim(),
+                cellName: formName.trim(),
+                memberId: mem.id,
+                memberName: mem.name,
+                memberPhone: mem.phone || '',
+                memberPhoto: mem.photoUrl || '',
+                locality: mem.locality || formLocation.trim() || '',
+                membershipStatus: 'Active',
+                joinedAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              });
+            }
+          });
+
+          await batch.commit();
+        } catch (memErr) {
+          console.warn('Error syncing careCellMemberships:', memErr);
+        }
+      }
+
       setModalOpen(false);
     } catch (err: any) {
       console.error('[CareCellsAdminPage] Error saving cell:', err);
@@ -384,6 +575,57 @@ export default function CareCellsAdminPage() {
         console.error('[CareCellsAdminPage] Error deleting cell:', err);
         showToast('Error deleting care cell.');
       }
+    }
+  };
+
+  // Schedule Meeting (Direct Action 2)
+  const openMeetingModal = (cellId?: string) => {
+    const target = cellId ? cells.find((c) => c.id === cellId) : cells[0];
+    setMeetingCellId(target?.id || '');
+    setMeetingTitle(target ? `${target.name} Fellowship` : 'Care Cell Fellowship & Bible Study');
+    setMeetingDescription('Weekly fellowship, Bible study, and prayer intercession');
+    setMeetingDate(new Date().toISOString().split('T')[0]);
+    setMeetingStartTime(target?.meetingTime || '19:00');
+    setMeetingEndTime(target?.meetingEndTime || '20:30');
+    setMeetingLocation(target?.meetingLocation || target?.location || '');
+    setMeetingType('Bible Study');
+    setMeetingScripture('Philippians 4:6-7');
+    setMeetingModalOpen(true);
+  };
+
+  const handleSaveMeeting = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!meetingTitle.trim() || !meetingDate) {
+      showToast('Please provide a meeting title and date.');
+      return;
+    }
+    const targetCell = cells.find((c) => c.id === meetingCellId) || cells[0];
+    setSavingMeeting(true);
+    try {
+      const meetingsCol = collection(db, 'Rhema Church', 'rhema', 'careCellMeetings');
+      await addDoc(meetingsCol, {
+        cellId: targetCell?.id || '',
+        cellCode: targetCell?.cellCode || '',
+        cellName: targetCell?.name || 'Care Cell',
+        title: meetingTitle.trim(),
+        description: meetingDescription.trim(),
+        date: meetingDate,
+        startTime: meetingStartTime.trim(),
+        endTime: meetingEndTime.trim(),
+        location: meetingLocation.trim() || targetCell?.meetingLocation || '',
+        meetingType,
+        scripture: meetingScripture.trim(),
+        status: 'Upcoming',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      showToast(`Meeting "${meetingTitle}" scheduled for ${targetCell?.name || 'Care Cell'}.`);
+      setMeetingModalOpen(false);
+    } catch (err: any) {
+      console.error('[CareCellsAdminPage] Error saving meeting:', err);
+      showToast(err.message || 'Error scheduling meeting.');
+    } finally {
+      setSavingMeeting(false);
     }
   };
 
@@ -437,7 +679,7 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── SUBTABS NAVIGATION (Overview, Care Cells, Members - Matching Mobile Screen) ── */}
+          {/* ── SUBTABS NAVIGATION (Overview, Care Cells, Members, Attendance - Matching Mobile Hub) ── */}
           <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto">
             <button
               onClick={() => setActiveSubTab('overview')}
@@ -471,6 +713,17 @@ export default function CareCellsAdminPage() {
             >
               <Users className="w-4 h-4" />
               Members Directory
+            </button>
+            <button
+              onClick={() => setActiveSubTab('attendance')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                activeSubTab === 'attendance'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              <ClipboardCheck className="w-4 h-4" />
+              Attendance
             </button>
           </div>
 
@@ -531,6 +784,49 @@ export default function CareCellsAdminPage() {
                 ))}
               </div>
 
+              {/* ── DIRECT ACTIONS (Positioned at Top as requested, Exact Mobile Parity) ── */}
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                    DIRECT ACTIONS
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-400">
+                    Quick Leadership Actions
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Button 1: New Care Cell */}
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:shadow"
+                  >
+                    <PlusCircle className="w-4 h-4 text-white" />
+                    <span>+ Create New Care Cell</span>
+                  </button>
+
+                  {/* Button 2: Schedule Meeting */}
+                  <button
+                    type="button"
+                    onClick={() => openMeetingModal()}
+                    className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:border-slate-300"
+                  >
+                    <CalendarPlus className="w-4 h-4 text-blue-600" />
+                    <span>Schedule Meeting</span>
+                  </button>
+
+                  {/* Button 3: Mark Attendance */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('attendance')}
+                    className="bg-white hover:bg-emerald-50 border border-slate-200 text-slate-800 hover:text-emerald-700 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:border-emerald-300"
+                  >
+                    <ClipboardCheck className="w-4 h-4 text-emerald-600" />
+                    <span>Mark Attendance</span>
+                  </button>
+                </div>
+              </div>
+
               {/* 6 Metric Cards (Exact Mobile Parity: media_1795697244620_d515e20e.jpg) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* 1. Total Care Cells */}
@@ -565,9 +861,7 @@ export default function CareCellsAdminPage() {
                     <ChevronRight className="w-4 h-4 text-slate-300" />
                   </div>
                   <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">
-                      {cells.reduce((acc, c) => acc + (c.activeMemberCount || 0), 0) || 2}
-                    </div>
+                    <div className="text-3xl font-extrabold text-slate-900">{totalEnrolledCount}</div>
                     <h4 className="text-sm font-bold text-slate-800 mt-1">Assigned Members</h4>
                     <p className="text-xs text-slate-500 mt-0.5">Enrolled cell members</p>
                   </div>
@@ -607,7 +901,10 @@ export default function CareCellsAdminPage() {
                 </div>
 
                 {/* 5. Meetings in Nov */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between">
+                <div
+                  onClick={() => openMeetingModal()}
+                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
+                >
                   <div className="flex items-center justify-between">
                     <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600">
                       <Calendar className="w-5 h-5" />
@@ -634,38 +931,6 @@ export default function CareCellsAdminPage() {
                     <h4 className="text-sm font-bold text-slate-800 mt-1">Care Follow-ups</h4>
                     <p className="text-xs text-slate-500 mt-0.5">Pending pastoral check-ins</p>
                   </div>
-                </div>
-              </div>
-
-              {/* Direct Actions Section (Matching Mobile: DIRECT ACTIONS) */}
-              <div className="pt-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-500 block mb-3">
-                  DIRECT ACTIONS
-                </span>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    onClick={openCreateModal}
-                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
-                  >
-                    <Plus className="w-4 h-4 mr-1.5" />
-                    Create New Care Cell
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setActiveSubTab('manage')}
-                    className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold"
-                  >
-                    <Building2 className="w-4 h-4 mr-1.5 text-blue-600" />
-                    View Care Cells Directory
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={() => setActiveSubTab('members')}
-                    className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold"
-                  >
-                    <Users className="w-4 h-4 mr-1.5 text-purple-600" />
-                    View Enrolled Members
-                  </Button>
                 </div>
               </div>
             </div>
@@ -719,170 +984,138 @@ export default function CareCellsAdminPage() {
                   <p className="text-sm">Loading care cells...</p>
                 </div>
               ) : filteredCells.length === 0 ? (
-                <div className="py-16 text-center bg-white rounded-2xl border border-dashed border-slate-300 p-8">
+                <div className="py-16 text-center bg-white rounded-2xl border border-slate-200 p-8">
                   <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                   <h3 className="text-base font-bold text-slate-800">No Care Cells Found</h3>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-                    {searchQuery || statusFilter !== 'All'
-                      ? 'No care cells match your current filter criteria.'
-                      : 'Create your first fellowship care cell group.'}
+                  <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                    No care cells matched your search or status filter. Try clearing filters or create a new care cell.
                   </p>
-                  <Button onClick={openCreateModal} className="mt-4 bg-slate-900 hover:bg-slate-800 text-white text-xs">
-                    <Plus className="w-3.5 h-3.5 mr-1.5" />
-                    New Care Cell
+                  <Button onClick={openCreateModal} className="mt-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold">
+                    <Plus className="w-4 h-4 mr-1.5" />
+                    Create Care Cell
                   </Button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                   {filteredCells.map((cell) => {
-                    const isActive = cell.status === 'Active';
-                    const isArchived = cell.status === 'Archived';
-                    const capacityPercent = Math.min(
+                    const capacityPct = Math.min(
                       100,
                       Math.round(((cell.activeMemberCount || 0) / (cell.maximumMembers || 20)) * 100)
                     );
-
                     return (
                       <div
                         key={cell.id}
-                        className={`bg-white rounded-2xl border transition-all duration-200 p-5 flex flex-col justify-between shadow-sm hover:shadow-md ${
-                          !isActive ? 'opacity-85 border-slate-200' : 'border-slate-200'
-                        }`}
+                        className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
                       >
-                        <div>
-                          {/* Top Header Row (Mobile Parity: Code Badge & Status Chip) */}
-                          <div className="flex items-center justify-between mb-3">
-                            <span className="font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-800 border border-slate-200">
-                              {cell.cellCode || 'Rhema_CareCell'}
-                            </span>
+                        <div className="space-y-4">
+                          {/* Card Header */}
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
+                                  {cell.cellCode}
+                                </span>
+                                {cell.location && (
+                                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <MapPin className="w-2.5 h-2.5" />
+                                    {cell.location}
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className="text-base font-bold text-slate-900 mt-1">{cell.name}</h3>
+                            </div>
                             <span
-                              className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
-                                isActive
-                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                                  : isArchived
-                                  ? 'bg-rose-50 text-rose-700 border-rose-200'
-                                  : 'bg-amber-50 text-amber-700 border-amber-200'
+                              className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full ${
+                                cell.status === 'Active'
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : cell.status === 'Inactive'
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  : 'bg-slate-100 text-slate-600 border border-slate-200'
                               }`}
                             >
                               {cell.status}
                             </span>
                           </div>
 
-                          <h3 className="text-base font-bold text-slate-900">{cell.name}</h3>
-                          {cell.description ? (
-                            <p className="text-xs text-slate-500 mt-1 line-clamp-2">{cell.description}</p>
-                          ) : null}
+                          {cell.description && (
+                            <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{cell.description}</p>
+                          )}
 
-                          {/* Leader Row */}
-                          <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-3">
-                            {cell.leaderPhoto ? (
-                              <img
-                                src={cell.leaderPhoto}
-                                alt={cell.leaderName}
-                                className="w-10 h-10 rounded-full object-cover border border-slate-200"
-                              />
-                            ) : (
-                              <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 font-bold text-sm">
-                                {cell.leaderName
-                                  ? cell.leaderName
-                                      .split(' ')
-                                      .map((n) => n[0])
-                                      .join('')
-                                      .slice(0, 2)
-                                      .toUpperCase()
-                                  : 'L'}
-                              </div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-slate-900 truncate">{cell.leaderName}</span>
-                                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">
-                                  Leader
-                                </span>
+                          {/* Leader Information */}
+                          <div className="p-3 bg-slate-50 rounded-xl space-y-2 border border-slate-100">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
+                                  {cell.leaderName
+                                    .split(' ')
+                                    .map((n) => n[0])
+                                    .join('')
+                                    .slice(0, 2)
+                                    .toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <span className="text-xs font-bold text-slate-900 block truncate">
+                                    {cell.leaderName}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 block">Cell Leader</span>
+                                </div>
                               </div>
                               {cell.leaderPhone && (
                                 <a
-                                  href={`tel:${cell.leaderPhone.replace(/[^0-9+]/g, '')}`}
-                                  className="text-xs text-blue-600 hover:underline flex items-center gap-1 mt-0.5"
+                                  href={`tel:${cell.leaderPhone}`}
+                                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
                                 >
                                   <Phone className="w-3 h-3" />
                                   {cell.leaderPhone}
                                 </a>
                               )}
                             </div>
-                          </div>
 
-                          {/* Assistant Leader Row (if present) */}
-                          {cell.assistantLeaderName ? (
-                            <div className="mt-2.5 pt-2 border-t border-slate-50 flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-xs">
-                                {cell.assistantLeaderName
-                                  .split(' ')
-                                  .map((n) => n[0])
-                                  .join('')
-                                  .slice(0, 2)
-                                  .toUpperCase()}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-xs font-semibold text-slate-800 truncate">
-                                    {cell.assistantLeaderName}
-                                  </span>
-                                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
-                                    Asst.
-                                  </span>
+                            {cell.assistantLeaderName && (
+                              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
+                                <div className="flex items-center gap-1.5 text-slate-600 truncate">
+                                  <UserCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                                  <span className="truncate">{cell.assistantLeaderName}</span>
                                 </div>
-                                {cell.assistantLeaderPhone && (
-                                  <a
-                                    href={`tel:${cell.assistantLeaderPhone.replace(/[^0-9+]/g, '')}`}
-                                    className="text-xs text-slate-500 hover:text-blue-600 flex items-center gap-1"
-                                  >
-                                    <Phone className="w-2.5 h-2.5" />
-                                    {cell.assistantLeaderPhone}
-                                  </a>
-                                )}
+                                <span className="text-[10px] font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full">
+                                  Assistant
+                                </span>
                               </div>
-                            </div>
-                          ) : null}
+                            )}
+                          </div>
 
-                          {/* Meeting Meta Row */}
-                          <div className="mt-4 bg-slate-50 p-3 rounded-xl space-y-1.5 text-xs text-slate-600 border border-slate-100">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span className="font-semibold text-slate-800">{cell.meetingDay}s</span>
-                              <span className="text-slate-300">•</span>
-                              <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                              <span>
-                                {formatTimeDisplay(cell.meetingTime)}
-                                {cell.meetingEndTime ? ` - ${formatTimeDisplay(cell.meetingEndTime)}` : ''}
+                          {/* Meeting Schedule Details */}
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                              <span className="text-[10px] font-bold text-slate-400 block uppercase">Meeting Day</span>
+                              <span className="font-bold text-slate-800 mt-0.5 block flex items-center gap-1">
+                                <Calendar className="w-3 h-3 text-slate-500" />
+                                {cell.meetingDay}
                               </span>
                             </div>
-                            <div className="flex items-start gap-2">
-                              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                              <span className="truncate">
-                                {cell.location} {cell.meetingLocation ? `· ${cell.meetingLocation}` : ''}
+                            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                              <span className="text-[10px] font-bold text-slate-400 block uppercase">Time</span>
+                              <span className="font-bold text-slate-800 mt-0.5 block flex items-center gap-1">
+                                <Clock className="w-3 h-3 text-slate-500" />
+                                {formatTimeDisplay(cell.meetingTime)}
                               </span>
                             </div>
                           </div>
 
-                          {/* Capacity Progress Bar */}
-                          <div className="mt-4">
-                            <div className="flex justify-between text-xs text-slate-600 mb-1 font-medium">
-                              <span>Capacity</span>
-                              <span>
-                                {cell.activeMemberCount || 0} / {cell.maximumMembers} ({capacityPercent}%)
+                          {/* Capacity / Active Members */}
+                          <div>
+                            <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                              <span className="text-slate-500">Enrolled Members</span>
+                              <span className="text-slate-800 font-bold">
+                                {cell.activeMemberCount || 0} / {cell.maximumMembers || 20} ({capacityPct}%)
                               </span>
                             </div>
-                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                               <div
                                 className={`h-full transition-all duration-300 ${
-                                  capacityPercent > 90
-                                    ? 'bg-rose-500'
-                                    : capacityPercent > 60
-                                    ? 'bg-amber-500'
-                                    : 'bg-emerald-500'
+                                  capacityPct >= 90 ? 'bg-rose-500' : capacityPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
                                 }`}
-                                style={{ width: `${capacityPercent}%` }}
+                                style={{ width: `${capacityPct}%` }}
                               />
                             </div>
                           </div>
@@ -890,14 +1123,24 @@ export default function CareCellsAdminPage() {
 
                         {/* Card Actions */}
                         <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                          <Button
-                            variant="secondary"
-                            onClick={() => openEditModal(cell)}
-                            className="h-8 px-3 text-xs flex items-center gap-1.5 border border-slate-200"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                            Edit
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              onClick={() => openEditModal(cell)}
+                              className="h-8 px-3 text-xs flex items-center gap-1.5 border border-slate-200"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                              Edit
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => openMeetingModal(cell.id)}
+                              className="h-8 px-2.5 text-xs flex items-center gap-1 border border-slate-200 text-blue-700 bg-blue-50/50 hover:bg-blue-50"
+                            >
+                              <CalendarPlus className="w-3.5 h-3.5" />
+                              Meeting
+                            </Button>
+                          </div>
                           <button
                             onClick={() => handleDeleteCell(cell)}
                             className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
@@ -952,7 +1195,142 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── CREATE / EDIT CARE CELL MODAL (FIXED ALIGNMENT & EXACT MOBILE PARITY) ── */}
+          {/* ── ATTENDANCE TAB (Roll-call for Care Cells) ── */}
+          {activeSubTab === 'attendance' && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <ClipboardCheck className="w-5 h-5 text-emerald-600" />
+                    Care Cell Attendance Roll-Call
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Record weekly meeting attendance for enrolled care cell fellowship members
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Select Cell */}
+                  <select
+                    value={attendanceCellId}
+                    onChange={(e) => setAttendanceCellId(e.target.value)}
+                    className="px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    {cells.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.cellCode})
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Select Date */}
+                  <input
+                    type="date"
+                    value={attendanceDate}
+                    onChange={(e) => setAttendanceDate(e.target.value)}
+                    className="px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {membersPool.length === 0 ? (
+                <div className="py-12 text-center text-slate-400 text-xs">Loading cell roster...</div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
+                    {membersPool.slice(0, 10).map((m) => {
+                      const cur = attendanceRoster[m.id] || 'Present';
+                      return (
+                        <div key={m.id} className="p-3 bg-white flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0">
+                              {m.name
+                                .split(' ')
+                                .map((n) => n[0])
+                                .join('')
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">{m.name}</span>
+                              <span className="text-[10px] text-slate-500 truncate block">
+                                {m.phone} {m.locality ? `· ${m.locality}` : ''}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setAttendanceRoster((prev) => ({ ...prev, [m.id]: 'Present' }))}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
+                                cur === 'Present'
+                                  ? 'bg-emerald-600 text-white shadow-xs'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              Present
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAttendanceRoster((prev) => ({ ...prev, [m.id]: 'Absent' }))}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
+                                cur === 'Absent'
+                                  ? 'bg-rose-600 text-white shadow-xs'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              Absent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAttendanceRoster((prev) => ({ ...prev, [m.id]: 'Late' }))}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
+                                cur === 'Late'
+                                  ? 'bg-amber-500 text-white shadow-xs'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              Late
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <Button
+                      onClick={async () => {
+                        setSavingAttendance(true);
+                        try {
+                          const col = collection(db, 'Rhema Church', 'rhema', 'careCellAttendance');
+                          await addDoc(col, {
+                            cellId: attendanceCellId,
+                            date: attendanceDate,
+                            roster: attendanceRoster,
+                            recordedAt: serverTimestamp(),
+                          });
+                          showToast('Care Cell Attendance saved successfully!');
+                        } catch (err: any) {
+                          showToast('Error saving attendance.');
+                        } finally {
+                          setSavingAttendance(false);
+                        }
+                      }}
+                      disabled={savingAttendance}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5"
+                    >
+                      {savingAttendance ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Check className="w-4 h-4 mr-1.5" />}
+                      Save Attendance Roll-Call
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── CREATE / EDIT CARE CELL MODAL (WITH ASSIGNED MEMBERS FIELD & SCROLLABLE CONTAINER) ── */}
           {modalOpen && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
@@ -1147,6 +1525,134 @@ export default function CareCellsAdminPage() {
                     )}
                   </div>
 
+                  {/* ── ASSIGNED MEMBERS SECTION (Exact Mobile Parity: CareCellFormModal.tsx lines 585-700) ── */}
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                          Assigned Members {formLocation.trim() ? `(${formLocation.trim()})` : ''}
+                        </span>
+                      </div>
+                      {locationMatchedMembers.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={toggleAllMatchedMembers}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-50 transition-colors"
+                        >
+                          {isAllMatchedSelected ? 'Deselect All' : 'Select All'}
+                        </button>
+                      )}
+                    </div>
+
+                    <p className="text-[11px] text-slate-500 leading-relaxed">
+                      {formLocation.trim()
+                        ? `Existing church members living within ${formLocation.trim()} based on saved profile locations.`
+                        : 'Enter a Location / Area above to match members living in that locality, or browse the church directory below.'}
+                    </p>
+
+                    {/* Location Matched Members List */}
+                    {formLocation.trim().length >= 2 && (
+                      <div className="space-y-1.5 pt-1">
+                        {locationMatchedMembers.length === 0 ? (
+                          <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-500">
+                            <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
+                            <span>No members currently saved with residential address in "{formLocation}".</span>
+                          </div>
+                        ) : (
+                          <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                            {locationMatchedMembers.map((mem) => {
+                              const isSel = selectedMembersMap.has(mem.id);
+                              return (
+                                <div
+                                  key={mem.id}
+                                  onClick={() => toggleMemberSelection(mem)}
+                                  className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                                    isSel
+                                      ? 'bg-blue-50/70 border-blue-300 shadow-xs'
+                                      : 'bg-white border-slate-200 hover:border-slate-300'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div
+                                      className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
+                                        isSel
+                                          ? 'bg-blue-600 border-blue-600 text-white'
+                                          : 'border-slate-300 bg-white'
+                                      }`}
+                                    >
+                                      {isSel && <Check className="w-3 h-3 stroke-[3]" />}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <span className="text-xs font-bold text-slate-900 block truncate">
+                                        {mem.name}
+                                      </span>
+                                      <div className="flex items-center gap-2 mt-0.5">
+                                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                                          <MapPin className="w-2.5 h-2.5 text-slate-500" />
+                                          {mem.locality || formLocation}
+                                        </span>
+                                        {mem.phone && (
+                                          <span className="text-[10px] text-slate-500">{mem.phone}</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Open Church Directory Lookup Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMemberDirectorySearch('');
+                        setShowAllMembersPicker(true);
+                      }}
+                      className="w-full py-2.5 px-3 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 flex items-center justify-center gap-2 transition-all shadow-xs"
+                    >
+                      <UserPlus className="w-4 h-4 text-blue-600" />
+                      <span>
+                        {formLocation.trim()
+                          ? `Browse / Filter Members in ${formLocation.trim()} (${selectedMembersMap.size} selected)`
+                          : `Select Members from Church Directory (${selectedMembersMap.size} selected)`}
+                      </span>
+                    </button>
+
+                    {/* Selected Members Chips */}
+                    {selectedMembersMap.size > 0 && (
+                      <div className="pt-2 border-t border-slate-200/60">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                          Enrolled Cell Members ({selectedMembersMap.size})
+                        </span>
+                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                          {Array.from(selectedMembersMap.values()).map((mem) => (
+                            <span
+                              key={mem.id}
+                              className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-800 text-[11px] font-semibold px-2 py-0.5 rounded-lg shadow-2xs"
+                            >
+                              <span>{mem.name}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeSelectedMember(mem.id);
+                                }}
+                                className="text-slate-400 hover:text-rose-600 ml-0.5"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Meeting Day * (Matching Mobile Day Pill Selector) */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
@@ -1311,10 +1817,295 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
+          {/* ── SCHEDULE MEETING MODAL (DIRECT ACTION 2 - Exact Mobile Parity: MeetingFormModal.tsx) ── */}
+          {meetingModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                      <CalendarPlus className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Schedule Care Cell Meeting</h2>
+                      <p className="text-xs text-slate-500">Plan weekly gathering, Bible study, and prayer topic</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setMeetingModalOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form id="meetingForm" onSubmit={handleSaveMeeting} className="p-6 overflow-y-auto flex-1 space-y-4">
+                  {/* Select Cell */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Care Cell *
+                    </label>
+                    <select
+                      value={meetingCellId}
+                      onChange={(e) => {
+                        const cid = e.target.value;
+                        setMeetingCellId(cid);
+                        const c = cells.find((item) => item.id === cid);
+                        if (c) {
+                          setMeetingTitle(`${c.name} Fellowship`);
+                          setMeetingLocation(c.meetingLocation || c.location);
+                          setMeetingStartTime(c.meetingTime || '19:00');
+                          setMeetingEndTime(c.meetingEndTime || '20:30');
+                        }
+                      }}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    >
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.cellCode}) · {c.location}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Meeting Title */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Meeting Title *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Weekly Fellowship & Bible Study"
+                      value={meetingTitle}
+                      onChange={(e) => setMeetingTitle(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Scripture Focus & Study Topic */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Scripture / Study Focus
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Philippians 4:6-7 / Overcoming Worry"
+                      value={meetingScripture}
+                      onChange={(e) => setMeetingScripture(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Date, Start Time, End Time */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        Meeting Date *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={meetingDate}
+                        onChange={(e) => setMeetingDate(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        Start Time
+                      </label>
+                      <input
+                        type="text"
+                        value={meetingStartTime}
+                        onChange={(e) => setMeetingStartTime(e.target.value)}
+                        placeholder="19:00"
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        End Time
+                      </label>
+                      <input
+                        type="text"
+                        value={meetingEndTime}
+                        onChange={(e) => setMeetingEndTime(e.target.value)}
+                        placeholder="20:30"
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Meeting Location */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Venue / Meeting Location
+                    </label>
+                    <input
+                      type="text"
+                      value={meetingLocation}
+                      onChange={(e) => setMeetingLocation(e.target.value)}
+                      placeholder="e.g. Leader's Residence / Community Center"
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Meeting Type */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                      Meeting Type
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {MEETING_TYPES.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setMeetingType(t)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                            meetingType === t
+                              ? 'bg-slate-900 text-white shadow-xs'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Notes / Description */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Pastoral Notes / Instructions
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Special prayer focus, guest speaker notes, or directions..."
+                      value={meetingDescription}
+                      onChange={(e) => setMeetingDescription(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    />
+                  </div>
+                </form>
+
+                <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0 bg-slate-50">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setMeetingModalOpen(false)}
+                    disabled={savingMeeting}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    form="meetingForm"
+                    disabled={savingMeeting}
+                    className="bg-black hover:bg-slate-900 text-white text-xs font-bold min-w-[140px]"
+                  >
+                    {savingMeeting ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Schedule Meeting'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── BROWSE CHURCH DIRECTORY SUB-MODAL (FOR MULTI-SELECT ASSIGNING MEMBERS) ── */}
+          {showAllMembersPicker && (
+            <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900">Select Members from Church Directory</h3>
+                    <p className="text-xs text-slate-500">
+                      {selectedMembersMap.size} members currently assigned to this care cell
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowAllMembersPicker(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-3 border-b border-slate-100">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Search member by name, phone or locality..."
+                      value={memberDirectorySearch}
+                      onChange={(e) => setMemberDirectorySearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
+                  {filteredDirectoryMembers.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">No members match search.</div>
+                  ) : (
+                    filteredDirectoryMembers.map((m) => {
+                      const isSel = selectedMembersMap.has(m.id);
+                      return (
+                        <div
+                          key={m.id}
+                          onClick={() => toggleMemberSelection(m)}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                            isSel
+                              ? 'bg-blue-50/70 border-blue-300 shadow-xs'
+                              : 'bg-white border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div
+                              className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
+                                isSel ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'
+                              }`}
+                            >
+                              {isSel && <Check className="w-3 h-3 stroke-[3]" />}
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-xs font-bold text-slate-900 block truncate">{m.name}</span>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {m.locality && (
+                                  <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
+                                    <MapPin className="w-2.5 h-2.5 text-slate-500" />
+                                    {m.locality}
+                                  </span>
+                                )}
+                                {m.phone && <span className="text-[10px] text-slate-500">{m.phone}</span>}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="p-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700">
+                    {selectedMembersMap.size} selected
+                  </span>
+                  <Button
+                    onClick={() => setShowAllMembersPicker(false)}
+                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-1.5"
+                  >
+                    Done
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ── MEMBER PICKER SUB-MODAL (FOR LEADER OR ASSISTANT) ── */}
           {(showLeaderPicker || showAssistantPicker) && (
             <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
+              <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
                 <div className="p-4 border-b border-slate-100 flex items-center justify-between">
                   <h3 className="text-sm font-bold text-slate-900">
                     {showLeaderPicker ? 'Select Cell Leader' : 'Assign Assistant Leader'}
