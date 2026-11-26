@@ -35,6 +35,8 @@ import {
   Briefcase,
   Layers,
   Sparkles,
+  Megaphone,
+  Send,
 } from 'lucide-react';
 
 export type VolunteerType = 'general' | 'event';
@@ -106,7 +108,6 @@ export default function VolunteerManagementAdminPage() {
   const [selectedApp, setSelectedApp] = useState<VolunteerRecord | null>(null);
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
-  const [showAssignModal, setShowAssignModal] = useState(false);
 
   // Duty Assignment Form State (Exact Mobile Parity)
   const [assignedRole, setAssignedRole] = useState('');
@@ -116,18 +117,13 @@ export default function VolunteerManagementAdminPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Add Volunteer Modal State
-  const [addModalOpen, setAddModalOpen] = useState(false);
-  const [newType, setNewType] = useState<VolunteerType>('general');
-  const [newName, setNewName] = useState('');
-  const [newPhone, setNewPhone] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newMinistries, setNewMinistries] = useState<string[]>([]);
-  const [newSkillsStr, setNewSkillsStr] = useState('');
-  const [newAvailability, setNewAvailability] = useState('');
-  const [newEventTitle, setNewEventTitle] = useState('');
-  const [newPreferredRole, setNewPreferredRole] = useState('Ushering & Welcome');
-  const [addingVolunteer, setAddingVolunteer] = useState(false);
+  // Post General Volunteer Call to Members Modal State
+  const [showPostCallModal, setShowPostCallModal] = useState(false);
+  const [callTitle, setCallTitle] = useState('Church Volunteer Call · స్వచ్ఛంద సేవకు ఆహ్వానం');
+  const [callDescription, setCallDescription] = useState('We invite all congregation members to step forward and serve in our church ministries for the upcoming services.');
+  const [callMinistries, setCallMinistries] = useState<string[]>(['Ushers & Greeters · ఆహ్వాన బృందం', 'Worship & Choir · ఆరాధన బృందం']);
+  const [callTargetDate, setCallTargetDate] = useState('Upcoming Sunday Services');
+  const [postingCall, setPostingCall] = useState(false);
 
   // Real-time Firestore subscription to canonical church collection
   useEffect(() => {
@@ -287,7 +283,6 @@ export default function VolunteerManagementAdminPage() {
     }
   };
 
-  // Open Approval / Assignment Modal
   const handleOpenApprove = (app: VolunteerRecord) => {
     setSelectedApp(app);
     if (app.volunteerType === 'event') {
@@ -297,7 +292,6 @@ export default function VolunteerManagementAdminPage() {
       setAssignedResponsibility(app.assignedResponsibility || '');
       setShowApprovalModal(true);
     } else {
-      // General volunteer quick approval confirmation
       if (confirm(`Approve general church volunteer application for ${app.memberName}?`)) {
         executeGeneralApproval(app.id, app.memberName);
       }
@@ -318,7 +312,6 @@ export default function VolunteerManagementAdminPage() {
     }
   };
 
-  // Save Event Volunteer Approval
   const handleConfirmEventApproval = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedApp) return;
@@ -344,7 +337,6 @@ export default function VolunteerManagementAdminPage() {
     }
   };
 
-  // Open Rejection Modal
   const handleOpenReject = (app: VolunteerRecord) => {
     setSelectedApp(app);
     setRejectionReason('');
@@ -373,7 +365,6 @@ export default function VolunteerManagementAdminPage() {
     }
   };
 
-  // Delete Application
   const handleDeleteApplication = async (app: VolunteerRecord) => {
     if (confirm(`Permanently delete volunteer application for ${app.memberName}? This cannot be undone.`)) {
       try {
@@ -386,50 +377,34 @@ export default function VolunteerManagementAdminPage() {
     }
   };
 
-  // Add Volunteer Manual Form
-  const handleAddVolunteer = async (e: React.FormEvent) => {
+  // Post General Volunteer Call to Members
+  const handlePostVolunteerCall = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newName.trim() || !newPhone.trim()) {
-      showToast('Please provide member name and phone number.');
-      return;
-    }
+    if (!callTitle.trim()) return;
 
-    setAddingVolunteer(true);
+    setPostingCall(true);
     try {
-      const colRef = collection(db, 'Rhema Church', 'rhema', 'volunteer_applications');
-      const parsedSkills = newSkillsStr
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      await addDoc(colRef, {
-        memberName: newName.trim(),
-        volunteerName: newName.trim(),
-        memberPhone: newPhone.trim(),
-        phoneMasked: newPhone.trim(),
-        email: newEmail.trim() || '',
-        volunteerType: newType,
-        status: 'pending',
-        preferredMinistries: newType === 'general' ? newMinistries : [],
-        skills: parsedSkills,
-        availabilityNotes: newAvailability.trim(),
-        eventTitle: newType === 'event' ? newEventTitle.trim() : '',
-        preferredRole: newType === 'event' ? newPreferredRole : '',
+      const notifCol = collection(db, 'Rhema Church', 'rhema', 'notifications');
+      await addDoc(notifCol, {
+        title: callTitle.trim(),
+        message: callDescription.trim(),
+        type: 'volunteer_call',
+        targetMinistries: callMinistries,
+        targetDate: callTargetDate,
         createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
-      showToast(`Volunteer record for "${newName}" created.`);
-      setAddModalOpen(false);
+      showToast('General Volunteer Call published to church congregation.');
+      setShowPostCallModal(false);
     } catch (err: any) {
-      console.error('[VolunteerAdminPage] Add volunteer error:', err);
-      showToast('Failed to add volunteer.');
+      console.error('[VolunteerAdminPage] Post call error:', err);
+      showToast('Failed to broadcast volunteer call.');
     } finally {
-      setAddingVolunteer(false);
+      setPostingCall(false);
     }
   };
 
-  const toggleMinistry = (m: string) => {
-    setNewMinistries((prev) =>
+  const toggleCallMinistry = (m: string) => {
+    setCallMinistries((prev) =>
       prev.includes(m) ? prev.filter((item) => item !== m) : [...prev, m]
     );
   };
@@ -437,7 +412,7 @@ export default function VolunteerManagementAdminPage() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
-        <div className="space-y-6 max-w-7xl mx-auto pb-12">
+        <div className="space-y-6 max-w-7xl mx-auto pb-16">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
@@ -456,12 +431,13 @@ export default function VolunteerManagementAdminPage() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Post General Volunteer Call to Members Button (Exact Mobile Parity Request) */}
               <Button
-                onClick={() => setAddModalOpen(true)}
-                className="bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2"
+                onClick={() => setShowPostCallModal(true)}
+                className="bg-black hover:bg-slate-900 text-white rounded-full px-5 py-2 font-bold text-sm shadow-sm flex items-center gap-2"
               >
-                <Plus className="w-4 h-4" />
-                Add Volunteer
+                <Megaphone className="w-4 h-4 text-emerald-400" />
+                Post General Volunteer Call to Members
               </Button>
             </div>
           </div>
@@ -617,9 +593,12 @@ export default function VolunteerManagementAdminPage() {
                   ? 'Applications submitted for general church volunteering will appear here.'
                   : 'Applications submitted for specific church events will appear here.'}
               </p>
-              <Button onClick={() => setAddModalOpen(true)} className="mt-4 bg-slate-900 hover:bg-slate-800 text-white text-xs">
-                <Plus className="w-3.5 h-3.5 mr-1.5" />
-                Add Volunteer
+              <Button
+                onClick={() => setShowPostCallModal(true)}
+                className="mt-4 bg-slate-900 hover:bg-slate-800 text-white text-xs"
+              >
+                <Megaphone className="w-3.5 h-3.5 mr-1.5" />
+                Post General Volunteer Call
               </Button>
             </div>
           ) : (
@@ -640,7 +619,6 @@ export default function VolunteerManagementAdminPage() {
                         : 'border-slate-200 hover:border-slate-300'
                     }`}
                   >
-                    {/* Header and Details based on Event vs General */}
                     <div className="p-4 sm:p-5">
                       {isEvent ? (
                         /* Event Volunteer Card Layout (Exact Mobile Parity) */
@@ -666,20 +644,25 @@ export default function VolunteerManagementAdminPage() {
                             </div>
                           </div>
 
-                          {/* 2. Volunteer Name & Applied for Role */}
+                          {/* 2. Volunteer Name & CALL Button (Mobile Parity: callBtn) */}
                           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
                             <div className="flex items-center gap-1.5 font-bold text-slate-800">
                               <User className="w-3.5 h-3.5 text-slate-400" />
                               <span>{app.memberName}</span>
                             </div>
+
+                            {/* Clickable Mobile Phone with prominent CALL Button (Matching Mobile) */}
                             {app.memberPhone && (
-                              <a
-                                href={`tel:${app.memberPhone.replace(/[^0-9+]/g, '')}`}
-                                className="text-emerald-700 hover:underline flex items-center gap-1 font-bold"
-                              >
-                                <Phone className="w-3 h-3" />
-                                {app.memberPhone}
-                              </a>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs text-slate-600 font-semibold">{app.memberPhone}</span>
+                                <a
+                                  href={`tel:${app.memberPhone.replace(/[^0-9+]/g, '')}`}
+                                  className="px-2.5 py-0.5 rounded-md bg-sky-100 hover:bg-sky-200 text-sky-800 text-[11px] font-extrabold flex items-center gap-1 transition-colors"
+                                >
+                                  <Phone className="w-2.5 h-2.5" />
+                                  CALL
+                                </a>
+                              </div>
                             )}
                           </div>
 
@@ -750,14 +733,18 @@ export default function VolunteerManagementAdminPage() {
                                   <span className="font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
                                     GENERAL CHURCH
                                   </span>
+                                  {/* Call Member with prominent CALL Button (Matching Mobile: styles.contactRow with CALL) */}
                                   {app.memberPhone && (
-                                    <a
-                                      href={`tel:${app.memberPhone.replace(/[^0-9+]/g, '')}`}
-                                      className="text-emerald-700 hover:underline flex items-center gap-1 font-bold ml-1"
-                                    >
-                                      <Phone className="w-3 h-3" />
-                                      {app.memberPhone}
-                                    </a>
+                                    <div className="flex items-center gap-1.5 ml-1">
+                                      <span className="font-medium text-slate-600">{app.memberPhone}</span>
+                                      <a
+                                        href={`tel:${app.memberPhone.replace(/[^0-9+]/g, '')}`}
+                                        className="px-2 py-0.5 rounded bg-sky-100 hover:bg-sky-200 text-sky-800 text-[10px] font-extrabold flex items-center gap-1 transition-colors"
+                                      >
+                                        <Phone className="w-2.5 h-2.5" />
+                                        CALL
+                                      </a>
+                                    </div>
                                   )}
                                 </div>
                               </div>
@@ -867,11 +854,137 @@ export default function VolunteerManagementAdminPage() {
             </div>
           )}
 
-          {/* Event Volunteer Approval & Assignment Modal (Exact Mobile Parity) */}
+          {/* ── POST GENERAL VOLUNTEER CALL TO MEMBERS MODAL (FIXED ALIGNMENT) ── */}
+          {showPostCallModal && (
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                {/* Fixed Header */}
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-800 flex items-center justify-center">
+                      <Megaphone className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-900">Post General Volunteer Call to Members</h2>
+                      <p className="text-xs text-slate-500">Broadcast ministry volunteer opportunities to the church</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowPostCallModal(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Scrollable Body */}
+                <form id="postCallForm" onSubmit={handlePostVolunteerCall} className="p-6 overflow-y-auto flex-1 space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Call Title *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Church Volunteer Call · స్వచ్ఛంద సేవకు ఆహ్వానం"
+                      value={callTitle}
+                      onChange={(e) => setCallTitle(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Service / Target Date
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Upcoming Sunday Services / Weekly Ministries"
+                      value={callTargetDate}
+                      onChange={(e) => setCallTargetDate(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                      Ministries Calling for Volunteers
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                      {COMMON_MINISTRIES.map((m) => {
+                        const isSelected = callMinistries.includes(m);
+                        return (
+                          <label
+                            key={m}
+                            className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer text-xs transition-colors ${
+                              isSelected
+                                ? 'bg-emerald-100/70 text-emerald-900 font-semibold'
+                                : 'hover:bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleCallMinistry(m)}
+                              className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300"
+                            />
+                            <span className="truncate">{m}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Call Description / Message to Members
+                    </label>
+                    <textarea
+                      rows={3}
+                      placeholder="Enter a brief invitation detailing how members can participate..."
+                      value={callDescription}
+                      onChange={(e) => setCallDescription(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </form>
+
+                {/* Fixed Footer */}
+                <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0 bg-slate-50">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setShowPostCallModal(false)}
+                    disabled={postingCall}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    form="postCallForm"
+                    disabled={postingCall}
+                    className="bg-black hover:bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 min-w-[150px]"
+                  >
+                    {postingCall ? (
+                      <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5 text-emerald-400" />
+                        Publish Volunteer Call
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── EVENT APPROVAL & ASSIGNMENT MODAL (FIXED ALIGNMENT) ── */}
           {showApprovalModal && selectedApp && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 my-8">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
                       <CheckCircle2 className="w-5 h-5" />
@@ -891,8 +1004,7 @@ export default function VolunteerManagementAdminPage() {
                   </button>
                 </div>
 
-                <form onSubmit={handleConfirmEventApproval} className="mt-5 space-y-4">
-                  {/* Assigned Role */}
+                <form id="eventDutyForm" onSubmit={handleConfirmEventApproval} className="p-6 overflow-y-auto flex-1 space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Assigned Role *
@@ -910,7 +1022,6 @@ export default function VolunteerManagementAdminPage() {
                     </select>
                   </div>
 
-                  {/* Time Slot & Location */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -938,7 +1049,6 @@ export default function VolunteerManagementAdminPage() {
                     </div>
                   </div>
 
-                  {/* Specific Responsibility */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Key Responsibility Notes
@@ -951,39 +1061,36 @@ export default function VolunteerManagementAdminPage() {
                       className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     />
                   </div>
-
-                  {/* Actions */}
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setShowApprovalModal(false)}
-                      disabled={actionLoading}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={actionLoading}
-                      className="bg-emerald-700 hover:bg-emerald-800 text-white min-w-[140px]"
-                    >
-                      {actionLoading ? (
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      ) : (
-                        'Approve & Assign'
-                      )}
-                    </Button>
-                  </div>
                 </form>
+
+                <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0 bg-slate-50">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setShowApprovalModal(false)}
+                    disabled={actionLoading}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    form="eventDutyForm"
+                    disabled={actionLoading}
+                    className="bg-black hover:bg-slate-900 text-white text-xs font-bold min-w-[140px]"
+                  >
+                    {actionLoading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Approve & Assign'}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Rejection / Decline Modal (Exact Mobile Parity) */}
+          {/* ── REJECTION / DECLINE MODAL ── */}
           {showRejectModal && selectedApp && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 my-8">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-md w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center">
                       <XCircle className="w-5 h-5" />
@@ -1001,7 +1108,7 @@ export default function VolunteerManagementAdminPage() {
                   </button>
                 </div>
 
-                <form onSubmit={handleConfirmRejection} className="mt-5 space-y-4">
+                <form id="declineForm" onSubmit={handleConfirmRejection} className="p-6 overflow-y-auto flex-1 space-y-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Reason for Declining (Optional)
@@ -1014,237 +1121,27 @@ export default function VolunteerManagementAdminPage() {
                       className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-500 focus:outline-none"
                     />
                   </div>
-
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setShowRejectModal(false)}
-                      disabled={actionLoading}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={actionLoading}
-                      className="bg-rose-600 hover:bg-rose-700 text-white min-w-[120px]"
-                    >
-                      {actionLoading ? (
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      ) : (
-                        'Confirm Decline'
-                      )}
-                    </Button>
-                  </div>
                 </form>
-              </div>
-            </div>
-          )}
 
-          {/* Add Volunteer Modal */}
-          {addModalOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-              <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 my-8">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                      <HeartHandshake className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">Add Volunteer Application</h2>
-                      <p className="text-xs text-slate-500">Record church volunteer interest</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setAddModalOpen(false)}
-                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0 bg-slate-50">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setShowRejectModal(false)}
+                    disabled={actionLoading}
+                    className="text-xs"
                   >
-                    <X className="w-5 h-5" />
-                  </button>
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    form="declineForm"
+                    disabled={actionLoading}
+                    className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold min-w-[120px]"
+                  >
+                    {actionLoading ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Confirm Decline'}
+                  </Button>
                 </div>
-
-                <form onSubmit={handleAddVolunteer} className="mt-5 space-y-4">
-                  {/* Category Selection */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Volunteer Type *
-                    </label>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button
-                        type="button"
-                        onClick={() => setNewType('general')}
-                        className={`p-3 rounded-xl border text-xs font-bold text-left transition-all ${
-                          newType === 'general'
-                            ? 'bg-emerald-50 border-emerald-600 text-emerald-900 ring-1 ring-emerald-600'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        General Church
-                        <span className="block text-[11px] font-normal text-slate-500 mt-0.5">
-                          Ongoing weekly ministries
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setNewType('event')}
-                        className={`p-3 rounded-xl border text-xs font-bold text-left transition-all ${
-                          newType === 'event'
-                            ? 'bg-emerald-50 border-emerald-600 text-emerald-900 ring-1 ring-emerald-600'
-                            : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                        }`}
-                      >
-                        Event Volunteers
-                        <span className="block text-[11px] font-normal text-slate-500 mt-0.5">
-                          Specific gathering support
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Name & Phone */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Member Full Name *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. John Peter"
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Contact Phone *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g. +91 98455 12345"
-                        value={newPhone}
-                        onChange={(e) => setNewPhone(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* If General: Preferred Ministries */}
-                  {newType === 'general' ? (
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-                        Preferred Ministries
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl">
-                        {COMMON_MINISTRIES.map((m) => {
-                          const isSelected = newMinistries.includes(m);
-                          return (
-                            <label
-                              key={m}
-                              className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer text-xs transition-colors ${
-                                isSelected ? 'bg-emerald-100/70 text-emerald-900 font-semibold' : 'hover:bg-slate-100 text-slate-700'
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => toggleMinistry(m)}
-                                className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300"
-                              />
-                              <span className="truncate">{m}</span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : (
-                    /* If Event: Event Title & Role */
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                          Event Title *
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="e.g. Sunday Celebration / Youth Conference"
-                          value={newEventTitle}
-                          onChange={(e) => setNewEventTitle(e.target.value)}
-                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                          Preferred Event Role
-                        </label>
-                        <select
-                          value={newPreferredRole}
-                          onChange={(e) => setNewPreferredRole(e.target.value)}
-                          className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white font-medium"
-                        >
-                          {COMMON_EVENT_ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Skills & Availability */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Skills (Comma separated)
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Guitar, Sound mixing, Crowd welcome"
-                        value={newSkillsStr}
-                        onChange={(e) => setNewSkillsStr(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Availability Notes
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Sunday 1st Service / Friday Evenings"
-                        value={newAvailability}
-                        onChange={(e) => setNewAvailability(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setAddModalOpen(false)}
-                      disabled={addingVolunteer}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={addingVolunteer}
-                      className="bg-slate-900 hover:bg-slate-800 text-white min-w-[120px]"
-                    >
-                      {addingVolunteer ? (
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      ) : (
-                        'Save Volunteer'
-                      )}
-                    </Button>
-                  </div>
-                </form>
               </div>
             </div>
           )}

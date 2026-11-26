@@ -34,6 +34,7 @@ import {
   ChevronUp,
   Loader2,
   Check,
+  History,
 } from 'lucide-react';
 
 export type BaptismStatus = 'pending' | 'under_review' | 'approved' | 'rejected' | 'completed';
@@ -47,6 +48,7 @@ export interface BaptismRecord {
   email?: string;
   age?: number;
   gender?: string;
+  dob?: string;
   address?: string;
   preferredDate?: string;
   status: BaptismStatus;
@@ -61,6 +63,12 @@ export interface BaptismRecord {
   adminRemarks?: string;
   counselorAssigned?: string;
   certificateIssued?: boolean;
+  history?: Array<{
+    status: string;
+    note?: string;
+    changedBy?: string;
+    timestamp?: any;
+  }>;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -90,6 +98,7 @@ export default function BaptismAdminPage() {
   const [newEmail, setNewEmail] = useState('');
   const [newAge, setNewAge] = useState<number>(24);
   const [newGender, setNewGender] = useState<'Male' | 'Female'>('Male');
+  const [newDob, setNewDob] = useState('');
   const [newAddress, setNewAddress] = useState('');
   const [newPreferredDate, setNewPreferredDate] = useState('');
   const [newPreviousBaptism, setNewPreviousBaptism] = useState<boolean>(false);
@@ -126,6 +135,7 @@ export default function BaptismAdminPage() {
             email: data.email || '',
             age: data.age || 20,
             gender: data.gender || '',
+            dob: data.dob || data.dateOfBirth || '',
             address: data.address || data.zone || '',
             preferredDate: data.preferredDate || '',
             status: normalizedStatus,
@@ -139,6 +149,7 @@ export default function BaptismAdminPage() {
             adminRemarks: data.adminRemarks || '',
             counselorAssigned: data.counselorAssigned || '',
             certificateIssued: Boolean(data.certificateIssued),
+            history: data.history || [],
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
           };
@@ -285,6 +296,7 @@ export default function BaptismAdminPage() {
       try {
         await deleteDoc(doc(db, 'Rhema Church', 'rhema', 'baptism_requests', req.id));
         showToast(`Baptism request for ${req.memberName} deleted.`);
+        setDetailModalOpen(false);
       } catch (err: any) {
         console.error('[BaptismAdminPage] Delete error:', err);
         showToast('Error deleting request.');
@@ -310,6 +322,7 @@ export default function BaptismAdminPage() {
         email: newEmail.trim() || '',
         age: Number(newAge) || 20,
         gender: newGender,
+        dob: newDob,
         address: newAddress.trim(),
         preferredDate: newPreferredDate.trim(),
         previousBaptism: newPreviousBaptism,
@@ -333,7 +346,7 @@ export default function BaptismAdminPage() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
-        <div className="space-y-6 max-w-7xl mx-auto pb-12">
+        <div className="space-y-6 max-w-7xl mx-auto pb-16">
           {/* Header */}
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
@@ -354,7 +367,7 @@ export default function BaptismAdminPage() {
             <div className="flex items-center gap-3">
               <Button
                 onClick={() => setAddModalOpen(true)}
-                className="bg-slate-900 hover:bg-slate-800 text-white flex items-center gap-2"
+                className="bg-black hover:bg-slate-900 text-white rounded-full px-5 py-2 font-bold text-sm shadow-sm flex items-center gap-2"
               >
                 <Plus className="w-4 h-4" />
                 Add Candidate
@@ -452,7 +465,6 @@ export default function BaptismAdminPage() {
 
           {/* Filter Bar & Search */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-            {/* Filter Tabs */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
               {(
                 [
@@ -481,7 +493,6 @@ export default function BaptismAdminPage() {
               })}
             </div>
 
-            {/* Search Input */}
             <div className="relative flex-1 max-w-md">
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
@@ -637,7 +648,6 @@ export default function BaptismAdminPage() {
                     {/* In-Place Expanded Content (Exact Mobile Parity) */}
                     {isExpanded && (
                       <div className="px-4 sm:px-5 pb-5 pt-2 border-t border-slate-100 bg-slate-50/50 space-y-3">
-                        {/* Testimony / Reason */}
                         {req.reason && (
                           <div className="bg-white p-3.5 rounded-xl border border-slate-200">
                             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
@@ -647,7 +657,6 @@ export default function BaptismAdminPage() {
                           </div>
                         )}
 
-                        {/* Candidate Notes */}
                         {req.additionalNotes && (
                           <div className="bg-white p-3.5 rounded-xl border border-slate-200">
                             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
@@ -657,7 +666,6 @@ export default function BaptismAdminPage() {
                           </div>
                         )}
 
-                        {/* Pastoral Remarks */}
                         {req.adminRemarks && (
                           <div className="bg-blue-50/80 p-3.5 rounded-xl border border-blue-200">
                             <span className="text-[11px] font-bold uppercase tracking-wider text-blue-700 block mb-1">
@@ -667,7 +675,6 @@ export default function BaptismAdminPage() {
                           </div>
                         )}
 
-                        {/* Quick Action Button */}
                         <div className="pt-2 flex justify-end">
                           <Button
                             onClick={() => openRequestDetail(req)}
@@ -685,20 +692,19 @@ export default function BaptismAdminPage() {
             </div>
           )}
 
-          {/* Review / Status Update Modal (Exact Mobile Parity) */}
+          {/* ── BAPTISM REVIEW / COUNSELING MODAL (EXACT MOBILE PARITY: AdminBaptism.tsx) ── */}
           {detailModalOpen && selectedRequest && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-              <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 my-8">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                {/* Modal Header (Matching Mobile: Baptism Request Review) */}
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                    <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-800 flex items-center justify-center">
                       <Droplets className="w-5 h-5" />
                     </div>
                     <div>
-                      <h2 className="text-base font-bold text-slate-900">Baptism Pastoral Counseling</h2>
-                      <p className="text-xs text-slate-500">
-                        {selectedRequest.memberName} · {selectedRequest.memberPhone || 'No Phone'}
-                      </p>
+                      <h2 className="text-base font-bold text-slate-900">Baptism Request Review</h2>
+                      <p className="text-xs text-slate-500">{selectedRequest.memberName}</p>
                     </div>
                   </div>
                   <button
@@ -709,119 +715,231 @@ export default function BaptismAdminPage() {
                   </button>
                 </div>
 
-                <form onSubmit={handleSaveAction} className="mt-5 space-y-4">
-                  {/* Status Selection */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Baptism Stage / Status *
-                    </label>
-                    <select
-                      value={editStatus}
-                      onChange={(e) => setEditStatus(e.target.value as BaptismStatus)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white font-semibold"
-                    >
-                      <option value="pending">Pending Review (Waiting for pastoral contact)</option>
-                      <option value="under_review">Under Review (Pastoral interview scheduled)</option>
-                      <option value="approved">Approved (Scheduled for baptism service)</option>
-                      <option value="completed">Completed (Baptism ceremony concluded)</option>
-                      <option value="rejected">Declined (Needs more preparation / spiritual counseling)</option>
-                    </select>
+                {/* Scrollable Form Body */}
+                <form id="baptismReviewForm" onSubmit={handleSaveAction} className="p-6 overflow-y-auto flex-1 space-y-4">
+                  {/* Member Quick Contact Bar (Matching Mobile: memberBar with Call button) */}
+                  <div className="p-3.5 bg-teal-50/70 border border-teal-200 rounded-xl flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span className="text-sm font-bold text-teal-950 block truncate">{selectedRequest.memberName}</span>
+                      <span className="text-xs text-teal-700 block">{selectedRequest.memberPhone}</span>
+                      {selectedRequest.address && (
+                        <span className="text-[11px] text-teal-600 truncate block mt-0.5">
+                          📍 {selectedRequest.address}
+                        </span>
+                      )}
+                    </div>
+                    {selectedRequest.memberPhone && (
+                      <a
+                        href={`tel:${selectedRequest.memberPhone.replace(/[^0-9+]/g, '')}`}
+                        className="px-3 py-1.5 rounded-lg bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold flex items-center gap-1.5 shrink-0 shadow-sm"
+                      >
+                        <Phone className="w-3 h-3" />
+                        Call
+                      </a>
+                    )}
                   </div>
 
-                  {/* Conditional Schedule Fields (if Approved or Completed) */}
-                  {(editStatus === 'approved' || editStatus === 'completed') && (
-                    <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-3">
-                      <span className="text-xs font-bold text-emerald-800 flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                        Baptism Service Schedule
-                      </span>
+                  {/* APPLICATION DETAILS Grid (Matching Mobile: infoGrid 4-cell) */}
+                  <div className="space-y-2">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      APPLICATION DETAILS
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">GENDER</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block truncate">
+                          {selectedRequest.gender || 'Not specified'}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">AGE</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block">
+                          {selectedRequest.age ? `${selectedRequest.age} yrs` : 'N/A'}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">DATE OF BIRTH</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block truncate">
+                          {selectedRequest.dob || 'N/A'}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className="text-[10px] font-bold uppercase text-slate-400 block">PREV. BAPTISM</span>
+                        <span className="font-semibold text-slate-800 mt-0.5 block truncate">
+                          {selectedRequest.previousBaptism ? 'Yes' : 'No (First Time)'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Reason for Baptism Box */}
+                    {selectedRequest.reason && (
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-0.5">
+                          REASON FOR BAPTISM:
+                        </span>
+                        <p className="text-slate-800 italic">"{selectedRequest.reason}"</p>
+                      </div>
+                    )}
+
+                    {/* Member Notes Box */}
+                    {selectedRequest.additionalNotes && (
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-0.5">
+                          MEMBER NOTES:
+                        </span>
+                        <p className="text-slate-800">{selectedRequest.additionalNotes}</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* APPROVAL & SCHEDULE WORKFLOW (Matching Mobile: statusRow pill buttons) */}
+                  <div className="space-y-3 pt-2 border-t border-slate-100">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      APPROVAL & SCHEDULE WORKFLOW
+                    </span>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">Set Request Status:</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(['pending', 'under_review', 'approved', 'rejected', 'completed'] as const).map((st) => {
+                          const isSel = editStatus === st;
+                          const label = st === 'under_review' ? 'Review' : st.charAt(0).toUpperCase() + st.slice(1);
+                          return (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => setEditStatus(st)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                                isSel
+                                  ? st === 'approved'
+                                    ? 'bg-emerald-600 text-white'
+                                    : st === 'completed'
+                                    ? 'bg-indigo-600 text-white'
+                                    : st === 'under_review'
+                                    ? 'bg-blue-600 text-white'
+                                    : st === 'rejected'
+                                    ? 'bg-rose-600 text-white'
+                                    : 'bg-amber-600 text-white'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Confirmed Baptism Schedule Box (Matching Mobile: scheduleBox) */}
+                    <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-teal-700" />
+                        <span className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                          CONFIRMED BAPTISM SCHEDULE
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Confirmed Date
+                        </label>
+                        <input
+                          type="date"
+                          value={confirmedDate}
+                          onChange={(e) => setConfirmedDate(e.target.value)}
+                          className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                        />
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <label className="block text-[11px] font-semibold text-emerald-800 mb-1">
-                            Confirmed Date *
-                          </label>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Time</label>
                           <input
-                            type="date"
-                            required
-                            value={confirmedDate}
-                            onChange={(e) => setConfirmedDate(e.target.value)}
-                            className="w-full px-3 py-1.5 text-sm bg-white border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                            type="text"
+                            placeholder="e.g. 10:30 AM"
+                            value={confirmedTime}
+                            onChange={(e) => setConfirmedTime(e.target.value)}
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] font-semibold text-emerald-800 mb-1">
-                            Confirmed Time
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Venue / Location
                           </label>
                           <input
                             type="text"
-                            placeholder="10:30 AM"
-                            value={confirmedTime}
-                            onChange={(e) => setConfirmedTime(e.target.value)}
-                            className="w-full px-3 py-1.5 text-sm bg-white border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                            placeholder="e.g. Main Baptistry"
+                            value={confirmedLocation}
+                            onChange={(e) => setConfirmedLocation(e.target.value)}
+                            className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-teal-500 focus:outline-none"
                           />
                         </div>
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-emerald-800 mb-1">
-                          Service Location
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Main Sanctuary Baptistry"
-                          value={confirmedLocation}
-                          onChange={(e) => setConfirmedLocation(e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm bg-white border border-emerald-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                        />
-                      </div>
                     </div>
-                  )}
 
-                  {/* Pastoral Remarks */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Pastoral Remarks / Counseling Notes
-                    </label>
-                    <textarea
-                      rows={3}
-                      placeholder="Enter notes on candidate's faith confession, salvation assurance, and pastoral interview outcome."
-                      value={adminRemarks}
-                      onChange={(e) => setAdminRemarks(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
+                    {/* Pastoral Remarks / Guidance (Sent to Member) */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Pastoral Remarks / Guidance (Sent to Member)
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder="Add pastoral notes, requirements, or reason if rejected..."
+                        value={adminRemarks}
+                        onChange={(e) => setAdminRemarks(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 focus:outline-none"
+                      />
+                    </div>
                   </div>
+                </form>
 
-                  {/* Actions */}
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+                {/* Fixed Modal Footer (Matching Mobile Action Buttons: Save & Notify + Delete This Request) */}
+                <div className="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteRequest(selectedRequest)}
+                    className="text-xs font-bold text-rose-600 hover:text-rose-700 px-3 py-2 rounded-xl hover:bg-rose-50 flex items-center gap-1.5 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete This Request
+                  </button>
+
+                  <div className="flex items-center gap-2">
                     <Button
                       type="button"
                       variant="secondary"
                       onClick={() => setDetailModalOpen(false)}
                       disabled={savingAction}
+                      className="text-xs"
                     >
                       Cancel
                     </Button>
                     <Button
                       type="submit"
+                      form="baptismReviewForm"
                       disabled={savingAction}
-                      className="bg-slate-900 hover:bg-slate-800 text-white min-w-[120px]"
+                      className="bg-black hover:bg-slate-900 text-white text-xs font-bold flex items-center gap-1.5 min-w-[180px]"
                     >
                       {savingAction ? (
                         <Loader2 className="w-4 h-4 animate-spin mx-auto" />
                       ) : (
-                        'Save Decision'
+                        <>
+                          <Check className="w-4 h-4 text-emerald-400" />
+                          Save Changes & Notify Member
+                        </>
                       )}
                     </Button>
                   </div>
-                </form>
+                </div>
               </div>
             </div>
           )}
 
           {/* Add Candidate Modal */}
           {addModalOpen && (
-            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-              <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 my-8">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
                   <div className="flex items-center gap-2.5">
                     <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
                       <Droplets className="w-5 h-5" />
@@ -839,8 +957,7 @@ export default function BaptismAdminPage() {
                   </button>
                 </div>
 
-                <form onSubmit={handleAddCandidate} className="mt-5 space-y-4">
-                  {/* Full Name & Phone */}
+                <form id="addCandidateForm" onSubmit={handleAddCandidate} className="p-6 overflow-y-auto flex-1 space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -870,7 +987,6 @@ export default function BaptismAdminPage() {
                     </div>
                   </div>
 
-                  {/* Age, Gender & Email */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -911,7 +1027,6 @@ export default function BaptismAdminPage() {
                     </div>
                   </div>
 
-                  {/* Address */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Residential Address / Locality
@@ -925,7 +1040,6 @@ export default function BaptismAdminPage() {
                     />
                   </div>
 
-                  {/* Previous Baptism Checkbox */}
                   <div className="flex items-center gap-2.5 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
                     <input
                       type="checkbox"
@@ -939,7 +1053,6 @@ export default function BaptismAdminPage() {
                     </label>
                   </div>
 
-                  {/* Personal Testimony */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Reason / Personal Testimony for Baptism
@@ -953,7 +1066,6 @@ export default function BaptismAdminPage() {
                     />
                   </div>
 
-                  {/* Additional Notes */}
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
                       Additional Notes (Optional)
@@ -966,30 +1078,27 @@ export default function BaptismAdminPage() {
                       className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     />
                   </div>
-
-                  {/* Actions */}
-                  <div className="pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setAddModalOpen(false)}
-                      disabled={addingCandidate}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={addingCandidate}
-                      className="bg-slate-900 hover:bg-slate-800 text-white min-w-[120px]"
-                    >
-                      {addingCandidate ? (
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      ) : (
-                        'Save Candidate'
-                      )}
-                    </Button>
-                  </div>
                 </form>
+
+                <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-3 shrink-0 bg-slate-50">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setAddModalOpen(false)}
+                    disabled={addingCandidate}
+                    className="text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    form="addCandidateForm"
+                    disabled={addingCandidate}
+                    className="bg-black hover:bg-slate-900 text-white text-xs font-bold min-w-[120px]"
+                  >
+                    {addingCandidate ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : 'Save Candidate'}
+                  </Button>
+                </div>
               </div>
             </div>
           )}
