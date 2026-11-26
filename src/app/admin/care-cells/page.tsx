@@ -64,6 +64,9 @@ import {
   Map as MapIcon,
   Shield,
   ExternalLink,
+  Ban,
+  HeartHandshake,
+  UserX,
 } from 'lucide-react';
 import { ENGLISH_NAMES, TELUGU_NAMES, getChapterCount, getVerseCount } from '@/lib/bible-metadata';
 
@@ -135,41 +138,60 @@ export interface CareCellMeetingRecord {
   updatedAt?: any;
 }
 
-export interface CareCellVisitRecord {
-  id: string;
-  cellId: string;
-  cellName: string;
+export interface CareCellVisitMemberResponse {
   memberId: string;
   memberName: string;
   memberPhone?: string;
-  visitDate: string;
-  visitTime?: string;
-  purpose: string;
-  location: string;
-  assignedVisitors: string;
+  memberPhoto?: string;
+  response: 'Pending' | 'Accepted' | 'Declined';
+  respondedAt?: any;
   notes?: string;
+  preferredTime?: string;
+}
+
+export interface CareCellVisitRecord {
+  id: string;
+  cellId: string;
+  cellCode?: string;
+  cellName: string;
+  title: string;
+  purpose?: string;
+  visitDate: string;
+  visitTime: string;
+  visitors: string;
+  location?: string;
   status: 'Scheduled' | 'Completed' | 'Cancelled';
+  totalMembersCount?: number;
+  acceptedCount?: number;
+  declinedCount?: number;
+  pendingCount?: number;
+  responses?: Record<string, CareCellVisitMemberResponse>;
+  targetMemberIds?: string[];
   createdAt?: any;
+  updatedAt?: any;
 }
 
 export interface CareCellFollowupRecord {
   id: string;
   cellId: string;
+  cellCode?: string;
   cellName: string;
   memberId: string;
   memberName: string;
   memberPhone?: string;
-  followupType: string;
-  reason: string;
-  notes?: string;
-  nextActionDate?: string;
-  status: 'Pending' | 'Completed' | 'Needs Further Follow-up';
+  memberPhoto?: string;
+  followupType: 'Phone Call' | 'WhatsApp Message' | 'Home Visit' | 'Personal Meeting' | 'Prayer Visit' | 'Other';
+  reason?: string;
+  notes: string;
+  nextFollowupDate?: string;
+  status: 'Pending' | 'Contacted' | 'Completed' | 'Needs Further Follow-up';
   createdAt?: any;
 }
 
 export interface CareCellNoticeRecord {
   id: string;
   cellId: string;
+  cellCode?: string;
   cellName: string;
   title: string;
   message: string;
@@ -180,9 +202,11 @@ export interface CareCellNoticeRecord {
 export interface CareCellPrayerRecord {
   id: string;
   cellId: string;
+  cellCode?: string;
   cellName: string;
   memberId: string;
   memberName: string;
+  memberPhone?: string;
   category: string;
   request: string;
   pastoralNotes?: string;
@@ -208,9 +232,27 @@ interface ChurchMemberOption {
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const STATUS_OPTIONS: ('Active' | 'Inactive' | 'Archived')[] = ['Active', 'Inactive', 'Archived'];
 const MEETING_TYPES = ['Bible Study', 'Prayer Meeting', 'Fellowship', 'Worship', 'Special Meeting', 'Other'];
-const VISIT_PURPOSES = ['Family Blessing', 'Pastoral Encouragement', 'Sick Visitation', 'New Believer Care', 'Crisis Support', 'General Check-in'];
-const FOLLOWUP_TYPES = ['Phone Call', 'In-Person Visit', 'WhatsApp Message', 'Prayer Session', 'Home Visit'];
-const FOLLOWUP_REASONS = ['Missed 2+ Meetings', 'Recent Illness / Hospitalization', 'Personal Life Event', 'Spiritual Care', 'New Member Welcome'];
+const VISIT_TITLE_PRESETS = [
+  'Pastoral Home Visit',
+  'Care & Prayer',
+  'Family Fellowship',
+  'Healing Prayer',
+  'Welcome Visit',
+];
+const FOLLOWUP_TYPES = [
+  'Phone Call',
+  'WhatsApp Message',
+  'Home Visit',
+  'Personal Meeting',
+  'Prayer Visit',
+];
+const FOLLOWUP_REASONS = [
+  'Missed recent care cell fellowship',
+  'Recent Illness / Hospitalization',
+  'Spiritual Care & Prayer',
+  'Personal Life Event',
+  'New Believer Welcome',
+];
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -383,41 +425,72 @@ export default function CareCellsAdminPage() {
       setMeetings(list);
     });
 
+    // ── Live Care Cell Visits ──
     const unsubVisits = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellVisits'), (snap) => {
-      const list: CareCellVisitRecord[] = snap.docs.map((d) => ({
-        id: d.id,
-        cellId: d.data().cellId || '',
-        cellName: d.data().cellName || '',
-        memberId: d.data().memberId || '',
-        memberName: d.data().memberName || 'Member',
-        memberPhone: d.data().memberPhone || '',
-        visitDate: d.data().visitDate || '',
-        visitTime: d.data().visitTime || '',
-        purpose: d.data().purpose || 'Routine Fellowship',
-        location: d.data().location || '',
-        assignedVisitors: d.data().assignedVisitors || 'Pastoral Care Team',
-        notes: d.data().notes || '',
-        status: d.data().status || 'Scheduled',
-        createdAt: d.data().createdAt,
-      }));
+      const list: CareCellVisitRecord[] = snap.docs.map((d) => {
+        const data = d.data();
+        const resp = (data.responses || {}) as Record<string, CareCellVisitMemberResponse>;
+        const responsesList = Object.values(resp);
+        const total = data.totalMembersCount || responsesList.length || 0;
+        const accepted =
+          data.acceptedCount !== undefined
+            ? data.acceptedCount
+            : responsesList.filter((r) => r.response === 'Accepted').length;
+        const declined =
+          data.declinedCount !== undefined
+            ? data.declinedCount
+            : responsesList.filter((r) => r.response === 'Declined').length;
+        const pending =
+          data.pendingCount !== undefined
+            ? data.pendingCount
+            : Math.max(0, total - accepted - declined);
+
+        return {
+          id: d.id,
+          cellId: data.cellId || '',
+          cellCode: data.cellCode || '',
+          cellName: data.cellName || 'Care Cell',
+          title: data.title || 'Pastoral Home Visit',
+          purpose: data.purpose || '',
+          visitDate: data.visitDate || '18-11-2026',
+          visitTime: data.visitTime || '5:00 PM',
+          visitors: data.visitors || data.assignedVisitors || 'Pastor & Cell Leader',
+          location: data.location || '',
+          status: data.status || 'Scheduled',
+          totalMembersCount: total,
+          acceptedCount: accepted,
+          declinedCount: declined,
+          pendingCount: pending,
+          responses: resp,
+          targetMemberIds: data.targetMemberIds,
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        };
+      });
       setVisits(list);
     });
 
+    // ── Live Follow-ups ──
     const unsubFollowups = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellFollowups'), (snap) => {
-      const list: CareCellFollowupRecord[] = snap.docs.map((d) => ({
-        id: d.id,
-        cellId: d.data().cellId || '',
-        cellName: d.data().cellName || '',
-        memberId: d.data().memberId || '',
-        memberName: d.data().memberName || 'Member',
-        memberPhone: d.data().memberPhone || '',
-        followupType: d.data().followupType || 'Phone Call',
-        reason: d.data().reason || 'Missed Gatherings',
-        notes: d.data().notes || '',
-        nextActionDate: d.data().nextActionDate || '',
-        status: d.data().status || 'Pending',
-        createdAt: d.data().createdAt,
-      }));
+      const list: CareCellFollowupRecord[] = snap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          cellId: data.cellId || '',
+          cellCode: data.cellCode || '',
+          cellName: data.cellName || 'Care Cell',
+          memberId: data.memberId || '',
+          memberName: data.memberName || 'Member',
+          memberPhone: data.memberPhone || '',
+          memberPhoto: data.memberPhoto || '',
+          followupType: data.followupType || 'Phone Call',
+          reason: data.reason || 'Missed recent care cell fellowship',
+          notes: data.notes || '',
+          nextFollowupDate: data.nextFollowupDate || data.nextActionDate || '',
+          status: data.status || 'Pending',
+          createdAt: data.createdAt,
+        };
+      });
       setFollowups(list);
     });
 
@@ -425,6 +498,7 @@ export default function CareCellsAdminPage() {
       const list: CareCellNoticeRecord[] = snap.docs.map((d) => ({
         id: d.id,
         cellId: d.data().cellId || '',
+        cellCode: d.data().cellCode || '',
         cellName: d.data().cellName || '',
         title: d.data().title || 'Notice',
         message: d.data().message || '',
@@ -438,9 +512,11 @@ export default function CareCellsAdminPage() {
       const list: CareCellPrayerRecord[] = snap.docs.map((d) => ({
         id: d.id,
         cellId: d.data().cellId || '',
+        cellCode: d.data().cellCode || '',
         cellName: d.data().cellName || '',
         memberId: d.data().memberId || '',
         memberName: d.data().memberName || 'Member',
+        memberPhone: d.data().memberPhone || '',
         category: d.data().category || 'General',
         request: d.data().request || '',
         pastoralNotes: d.data().pastoralNotes || '',
@@ -524,22 +600,6 @@ export default function CareCellsAdminPage() {
               locality: 'Koilakuntla',
               address: 'Koilakuntla',
               memberCode: 'Rhema-002',
-            },
-            {
-              id: 'demo-5',
-              name: 'David Abraham',
-              phone: '+919876543210',
-              locality: 'Hebbal',
-              address: 'Hebbal Ring Road',
-              memberCode: 'Rhema-007',
-            },
-            {
-              id: 'demo-6',
-              name: 'Mary Grace',
-              phone: '+919876543211',
-              locality: 'Indiranagar',
-              address: '100ft Road, Indiranagar',
-              memberCode: 'Rhema-008',
             },
           ];
         }
@@ -1267,7 +1327,6 @@ export default function CareCellsAdminPage() {
   // ── 8. Member Locations Tab State (Map vs List, Route Planning) ───────────────
   const [locationsViewMode, setLocationsViewMode] = useState<'map' | 'list'>('map');
   const [locationsLocalityFilter, setLocationsLocalityFilter] = useState<string>('ALL');
-  const [locationsNeedsVisitOnly, setLocationsNeedsVisitOnly] = useState<boolean>(false);
   const [plannedRouteMemberIds, setPlannedRouteMemberIds] = useState<string[]>([]);
 
   const handleToggleRoute = (memberId: string) => {
@@ -1278,148 +1337,281 @@ export default function CareCellsAdminPage() {
 
   const handleOpenMultiStopRoute = (membersToRoute: CareCellMembershipRecord[]) => {
     if (membersToRoute.length === 0) return;
-    const dest = encodeURIComponent(membersToRoute[membersToRoute.length - 1].address || membersToRoute[membersToRoute.length - 1].locality || 'Koilakuntla');
+    const dest = encodeURIComponent(
+      membersToRoute[membersToRoute.length - 1].address ||
+        membersToRoute[membersToRoute.length - 1].locality ||
+        'Koilakuntla'
+    );
     const waypoints = membersToRoute
       .slice(0, membersToRoute.length - 1)
       .map((m) => encodeURIComponent(m.address || m.locality || ''))
       .filter(Boolean)
       .join('|');
 
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}${waypoints ? `&waypoints=${waypoints}` : ''}&travelmode=driving`;
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}${
+      waypoints ? `&waypoints=${waypoints}` : ''
+    }&travelmode=driving`;
     window.open(url, '_blank');
   };
 
-  // ── 9. Visits Tab State ───────────────────────────────────────────────────────
-  const [visitModalOpen, setVisitModalOpen] = useState(false);
-  const [visitCellId, setVisitCellId] = useState('');
-  const [visitMemberId, setVisitMemberId] = useState('');
-  const [visitMemberName, setVisitMemberName] = useState('');
-  const [visitMemberPhone, setVisitMemberPhone] = useState('');
-  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [visitTime, setVisitTime] = useState('18:00');
-  const [visitPurpose, setVisitPurpose] = useState('Family Blessing');
-  const [visitLocation, setVisitLocation] = useState('');
-  const [visitAssignedVisitors, setVisitAssignedVisitors] = useState('Pastor & Care Cell Leader');
-  const [visitNotes, setVisitNotes] = useState('');
-  const [savingVisit, setSavingVisit] = useState(false);
+  // ── 9. Visits Tab State & Modals (100% Mobile Parity CareCellVisitsTab) ─────────
   const [visitStatusFilter, setVisitStatusFilter] = useState<'ALL' | 'Scheduled' | 'Completed' | 'Cancelled'>('ALL');
+  const [createVisitModalOpen, setCreateVisitModalOpen] = useState(false);
+  const [selectedVisitForResponses, setSelectedVisitForResponses] = useState<CareCellVisitRecord | null>(null);
+
+  // Schedule Visit Form State
+  const [visitFormCellId, setVisitFormCellId] = useState('');
+  const [visitFormTitle, setVisitFormTitle] = useState('Pastoral Home Visit');
+  const [visitFormPurpose, setVisitFormPurpose] = useState('');
+  const [visitFormDate, setVisitFormDate] = useState(() => {
+    const tmr = new Date();
+    tmr.setDate(tmr.getDate() + 1);
+    return tmr.toISOString().split('T')[0];
+  });
+  const [visitFormTime, setVisitFormTime] = useState('5:00 PM');
+  const [visitFormVisitors, setVisitFormVisitors] = useState('Pastor & Cell Leader');
+  const [visitScope, setVisitScope] = useState<'ALL' | 'SPECIFIC'>('ALL');
+  const [visitSelectedMemberIds, setVisitSelectedMemberIds] = useState<string[]>([]);
+  const [savingVisit, setSavingVisit] = useState(false);
+
+  // Response breakdown modal filter
+  const [responsesFilter, setResponsesFilter] = useState<'ALL' | 'Accepted' | 'Declined' | 'Pending'>('ALL');
+  const [responsesSearchQuery, setResponsesSearchQuery] = useState('');
+
+  // Visits high-level metric calculations (Total, Accepted, Pending)
+  const visitMetrics = useMemo(() => {
+    const totalVisits = visits.length;
+    let totalAccepted = 0;
+    let totalPending = 0;
+    visits.forEach((v) => {
+      totalAccepted += v.acceptedCount || 0;
+      totalPending += v.pendingCount || 0;
+    });
+    return { totalVisits, totalAccepted, totalPending };
+  }, [visits]);
+
+  // Filtered visits
+  const filteredVisits = useMemo(() => {
+    return visits.filter((v) => {
+      if (selectedCellFilter !== 'ALL' && v.cellId !== selectedCellFilter) return false;
+      if (visitStatusFilter !== 'ALL' && v.status !== visitStatusFilter) return false;
+      return true;
+    });
+  }, [visits, selectedCellFilter, visitStatusFilter]);
 
   const openScheduleVisitModal = () => {
     const targetCell = cells.find((c) => c.id === selectedCellFilter) || cells[0];
-    setVisitCellId(targetCell?.id || '');
-    setVisitMemberId('');
-    setVisitMemberName('');
-    setVisitMemberPhone('');
-    setVisitDate(new Date().toISOString().split('T')[0]);
-    setVisitTime('18:00');
-    setVisitPurpose('Family Blessing');
-    setVisitLocation(targetCell?.meetingLocation || targetCell?.location || '');
-    setVisitAssignedVisitors('Pastor & Care Cell Leader');
-    setVisitNotes('');
-    setVisitModalOpen(true);
+    setVisitFormCellId(targetCell?.id || '');
+    setVisitFormTitle('Pastoral Home Visit');
+    setVisitFormPurpose('');
+    const tmr = new Date();
+    tmr.setDate(tmr.getDate() + 1);
+    setVisitFormDate(tmr.toISOString().split('T')[0]);
+    setVisitFormTime('5:00 PM');
+    setVisitFormVisitors('Pastor & Cell Leader');
+    setVisitScope('ALL');
+    setVisitSelectedMemberIds([]);
+    setCreateVisitModalOpen(true);
   };
 
-  const handleSaveVisit = async (e: React.FormEvent) => {
+  const handleSaveVisitNotification = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!visitCellId || !visitMemberName.trim()) {
-      alert('Please select Care Cell and Member name.');
+    if (!visitFormCellId) {
+      alert('Please select a Care Cell.');
       return;
     }
+    if (!visitFormTitle.trim() || !visitFormDate) {
+      alert('Please enter visit title and date.');
+      return;
+    }
+
     setSavingVisit(true);
     try {
-      const targetCell = cells.find((c) => c.id === visitCellId);
+      const targetCell = cells.find((c) => c.id === visitFormCellId);
+      const activeCellMembers = memberships.filter(
+        (m) => m.cellId === visitFormCellId && m.membershipStatus === 'Active'
+      );
+
+      const targetMembers =
+        visitScope === 'SPECIFIC' && visitSelectedMemberIds.length > 0
+          ? activeCellMembers.filter((m) => visitSelectedMemberIds.includes(m.memberId))
+          : activeCellMembers;
+
+      // Initialize responses map
+      const responses: Record<string, CareCellVisitMemberResponse> = {};
+      for (const mem of targetMembers) {
+        responses[mem.memberId] = {
+          memberId: mem.memberId,
+          memberName: mem.memberName,
+          memberPhone: mem.memberPhone || '',
+          memberPhoto: mem.memberPhoto || '',
+          response: 'Pending',
+          preferredTime: '',
+        };
+      }
+
       await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellVisits'), {
-        cellId: visitCellId,
+        cellId: visitFormCellId,
+        cellCode: targetCell?.cellCode || '',
         cellName: targetCell?.name || 'Care Cell',
-        memberId: visitMemberId || 'guest',
-        memberName: visitMemberName.trim(),
-        memberPhone: visitMemberPhone.trim(),
-        visitDate,
-        visitTime,
-        purpose: visitPurpose,
-        location: visitLocation.trim(),
-        assignedVisitors: visitAssignedVisitors.trim(),
-        notes: visitNotes.trim(),
+        title: visitFormTitle.trim(),
+        purpose: visitFormPurpose.trim(),
+        visitDate: visitFormDate,
+        visitTime: visitFormTime.trim(),
+        visitors: visitFormVisitors.trim(),
+        location: targetCell?.meetingLocation || targetCell?.location || '',
         status: 'Scheduled',
+        totalMembersCount: targetMembers.length,
+        acceptedCount: 0,
+        declinedCount: 0,
+        pendingCount: targetMembers.length,
+        responses,
+        targetMemberIds: visitScope === 'SPECIFIC' ? visitSelectedMemberIds : undefined,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
-      showToast('Pastoral visit scheduled successfully!');
-      setVisitModalOpen(false);
+
+      showToast(`Visit notification scheduled for ${targetMembers.length} member(s)!`);
+      setCreateVisitModalOpen(false);
     } catch (err: any) {
       console.error('Error saving visit:', err);
-      alert('Failed to save visit.');
+      alert('Failed to schedule visit: ' + (err.message || 'Unknown error'));
     } finally {
       setSavingVisit(false);
     }
   };
 
-  const handleMarkVisitCompleted = async (v: CareCellVisitRecord) => {
+  const handleUpdateVisitStatus = async (v: CareCellVisitRecord, newStatus: 'Scheduled' | 'Completed' | 'Cancelled') => {
     try {
       await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellVisits', v.id), {
-        status: 'Completed',
-        completedAt: serverTimestamp(),
+        status: newStatus,
+        updatedAt: serverTimestamp(),
       });
-      showToast('Visit marked as completed!');
+      showToast(`Visit status updated to ${newStatus}!`);
     } catch (err: any) {
-      console.error('Error marking visit completed:', err);
+      console.error('Error updating visit status:', err);
+      alert('Failed to update visit status.');
     }
   };
 
-  // ── 10. Follow-ups Tab State ──────────────────────────────────────────────────
+  const handleDeleteVisit = async (v: CareCellVisitRecord) => {
+    const confirmed = window.confirm(`Are you sure you want to delete "${v.title}"? This cannot be undone.`);
+    if (!confirmed) return;
+    try {
+      await deleteDoc(doc(db, 'Rhema Church', 'rhema', 'careCellVisits', v.id));
+      showToast('Visit notification deleted.');
+    } catch (err: any) {
+      console.error('Error deleting visit:', err);
+      alert('Failed to delete visit.');
+    }
+  };
+
+  const handleToggleMemberResponse = async (
+    visitId: string,
+    memberId: string,
+    newStatus: 'Accepted' | 'Declined' | 'Pending'
+  ) => {
+    if (!selectedVisitForResponses) return;
+    try {
+      const curResponses = { ...(selectedVisitForResponses.responses || {}) };
+      if (curResponses[memberId]) {
+        curResponses[memberId] = {
+          ...curResponses[memberId],
+          response: newStatus,
+          respondedAt: new Date().toISOString(),
+        };
+      }
+
+      const list = Object.values(curResponses);
+      const accepted = list.filter((r) => r.response === 'Accepted').length;
+      const declined = list.filter((r) => r.response === 'Declined').length;
+      const pending = list.filter((r) => r.response === 'Pending' || !r.response).length;
+
+      const visitRef = doc(db, 'Rhema Church', 'rhema', 'careCellVisits', visitId);
+      await updateDoc(visitRef, {
+        responses: curResponses,
+        acceptedCount: accepted,
+        declinedCount: declined,
+        pendingCount: pending,
+        updatedAt: serverTimestamp(),
+      });
+
+      setSelectedVisitForResponses({
+        ...selectedVisitForResponses,
+        responses: curResponses,
+        acceptedCount: accepted,
+        declinedCount: declined,
+        pendingCount: pending,
+      });
+
+      showToast(`Member response updated to ${newStatus}!`);
+    } catch (err: any) {
+      console.error('Error updating response:', err);
+      alert('Failed to update member response.');
+    }
+  };
+
+  // ── 10. Follow-ups Tab State & Handlers (100% Mobile Parity) ───────────────────
+  const [followupStatusFilter, setFollowupStatusFilter] = useState<string>('ALL');
+  const [followupSearchQuery, setFollowupSearchQuery] = useState('');
   const [followupModalOpen, setFollowupModalOpen] = useState(false);
-  const [followupCellId, setFollowupCellId] = useState('');
-  const [followupMemberId, setFollowupMemberId] = useState('');
-  const [followupMemberName, setFollowupMemberName] = useState('');
-  const [followupMemberPhone, setFollowupMemberPhone] = useState('');
-  const [followupType, setFollowupType] = useState('Phone Call');
-  const [followupReason, setFollowupReason] = useState('Missed 2+ Meetings');
-  const [followupNotes, setFollowupNotes] = useState('');
-  const [followupNextActionDate, setFollowupNextActionDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [followupFormCellId, setFollowupFormCellId] = useState('');
+  const [followupFormMemberId, setFollowupFormMemberId] = useState('');
+  const [followupFormMemberName, setFollowupFormMemberName] = useState('');
+  const [followupFormMemberPhone, setFollowupFormMemberPhone] = useState('');
+  const [followupFormType, setFollowupFormType] = useState<CareCellFollowupRecord['followupType']>('Phone Call');
+  const [followupFormReason, setFollowupFormReason] = useState('Missed recent care cell fellowship');
+  const [followupFormNotes, setFollowupFormNotes] = useState('');
+  const [followupFormNextDate, setFollowupFormNextDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [savingFollowup, setSavingFollowup] = useState(false);
 
-  const openLogFollowupModal = (defaultMember?: CareCellMembershipRecord) => {
-    const targetCell = defaultMember
-      ? cells.find((c) => c.id === defaultMember.cellId) || cells[0]
-      : cells.find((c) => c.id === selectedCellFilter) || cells[0];
-
-    setFollowupCellId(targetCell?.id || '');
-    setFollowupMemberId(defaultMember?.memberId || '');
-    setFollowupMemberName(defaultMember?.memberName || '');
-    setFollowupMemberPhone(defaultMember?.memberPhone || '');
-    setFollowupType('Phone Call');
-    setFollowupReason('Missed 2+ Meetings');
-    setFollowupNotes('');
-    setFollowupNextActionDate(new Date().toISOString().split('T')[0]);
+  const openLogFollowupModal = () => {
+    const targetCell = cells.find((c) => c.id === selectedCellFilter) || cells[0];
+    setFollowupFormCellId(targetCell?.id || '');
+    setFollowupFormMemberId('');
+    setFollowupFormMemberName('');
+    setFollowupFormMemberPhone('');
+    setFollowupFormType('Phone Call');
+    setFollowupFormReason('Missed recent care cell fellowship');
+    setFollowupFormNotes('');
+    setFollowupFormNextDate(new Date().toISOString().split('T')[0]);
     setFollowupModalOpen(true);
   };
 
   const handleSaveFollowup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!followupCellId || !followupMemberName.trim()) {
-      alert('Please select Care Cell and Member.');
+    if (!followupFormCellId || !followupFormMemberName.trim()) {
+      alert('Please select a Care Cell and Member.');
       return;
     }
+    if (!followupFormNotes.trim()) {
+      alert('Please enter pastoral notes.');
+      return;
+    }
+
     setSavingFollowup(true);
     try {
-      const targetCell = cells.find((c) => c.id === followupCellId);
+      const targetCell = cells.find((c) => c.id === followupFormCellId);
       await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellFollowups'), {
-        cellId: followupCellId,
+        cellId: followupFormCellId,
+        cellCode: targetCell?.cellCode || '',
         cellName: targetCell?.name || 'Care Cell',
-        memberId: followupMemberId || 'guest',
-        memberName: followupMemberName.trim(),
-        memberPhone: followupMemberPhone.trim(),
-        followupType,
-        reason: followupReason,
-        notes: followupNotes.trim(),
-        nextActionDate: followupNextActionDate,
-        status: 'Pending',
+        memberId: followupFormMemberId || 'guest',
+        memberName: followupFormMemberName.trim(),
+        memberPhone: followupFormMemberPhone.trim(),
+        followupType: followupFormType,
+        reason: followupFormReason.trim(),
+        notes: followupFormNotes.trim(),
+        nextFollowupDate: followupFormNextDate,
+        status: 'Contacted',
         createdAt: serverTimestamp(),
       });
-      showToast('Follow-up logged successfully!');
+
+      showToast('Pastoral follow-up logged successfully!');
       setFollowupModalOpen(false);
     } catch (err: any) {
-      console.error('Error saving follow-up:', err);
-      alert('Failed to log follow-up.');
+      console.error('Error logging follow-up:', err);
+      alert('Failed to save follow-up: ' + (err.message || 'Unknown error'));
     } finally {
       setSavingFollowup(false);
     }
@@ -1431,13 +1623,29 @@ export default function CareCellsAdminPage() {
         status: 'Completed',
         resolvedAt: serverTimestamp(),
       });
-      showToast('Follow-up marked as resolved!');
+      showToast('Follow-up marked as completed!');
     } catch (err: any) {
       console.error('Error resolving follow-up:', err);
     }
   };
 
-  // ── 11. Notices & Prayer Tab State ───────────────────────────────────────────
+  const filteredFollowups = useMemo(() => {
+    return followups.filter((f) => {
+      if (selectedCellFilter !== 'ALL' && f.cellId !== selectedCellFilter) return false;
+      if (followupStatusFilter !== 'ALL' && f.status !== followupStatusFilter) return false;
+      if (followupSearchQuery.trim()) {
+        const q = followupSearchQuery.toLowerCase();
+        return (
+          f.memberName.toLowerCase().includes(q) ||
+          f.notes.toLowerCase().includes(q) ||
+          (f.reason || '').toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [followups, selectedCellFilter, followupStatusFilter, followupSearchQuery]);
+
+  // ── 11. Notices & Prayer Tab State & Handlers (100% Mobile Parity) ─────────────
   const [announcePrayerSection, setAnnouncePrayerSection] = useState<'prayers' | 'announcements'>('prayers');
   const [noticeModalOpen, setNoticeModalOpen] = useState(false);
   const [noticeCellId, setNoticeCellId] = useState('');
@@ -1461,6 +1669,7 @@ export default function CareCellsAdminPage() {
       const targetCell = cells.find((c) => c.id === noticeCellId);
       await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellAnnouncements'), {
         cellId: noticeCellId || 'ALL',
+        cellCode: targetCell?.cellCode || '',
         cellName: targetCell ? targetCell.name : 'All Care Cells',
         title: noticeTitle.trim(),
         message: noticeMessage.trim(),
@@ -1486,6 +1695,7 @@ export default function CareCellsAdminPage() {
       const targetCell = cells.find((c) => c.id === prayerCellId);
       await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellPrayerRequests'), {
         cellId: prayerCellId || 'ALL',
+        cellCode: targetCell?.cellCode || '',
         cellName: targetCell ? targetCell.name : 'All Care Cells',
         memberId: 'member',
         memberName: prayerMemberName.trim(),
@@ -1504,6 +1714,20 @@ export default function CareCellsAdminPage() {
       setSavingPrayer(false);
     }
   };
+
+  const filteredPrayers = useMemo(() => {
+    return prayers.filter((p) => {
+      if (selectedCellFilter !== 'ALL' && p.cellId !== selectedCellFilter && p.cellId !== 'ALL') return false;
+      return true;
+    });
+  }, [prayers, selectedCellFilter]);
+
+  const filteredNotices = useMemo(() => {
+    return notices.filter((n) => {
+      if (selectedCellFilter !== 'ALL' && n.cellId !== selectedCellFilter && n.cellId !== 'ALL') return false;
+      return true;
+    });
+  }, [notices, selectedCellFilter]);
 
   // ── Filtered Records for Active Tab ───────────────────────────────────────────
   const filteredCells = useMemo(() => {
@@ -1538,7 +1762,6 @@ export default function CareCellsAdminPage() {
     });
   }, [memberships, selectedCellFilter, searchQuery]);
 
-  // Meetings filtered by active cell AND selected calendar month/year
   const filteredMeetings = useMemo(() => {
     return meetings.filter((m) => {
       if (selectedCellFilter !== 'ALL' && m.cellId !== selectedCellFilter) return false;
@@ -1554,7 +1777,6 @@ export default function CareCellsAdminPage() {
     });
   }, [meetings, selectedCellFilter, selectedMonth, selectedYear]);
 
-  // Calculate meetings in selected month count for analytics
   const meetingsInSelectedMonthCount = useMemo(() => {
     return meetings.filter((m) => {
       if (m.date) {
@@ -1579,7 +1801,6 @@ export default function CareCellsAdminPage() {
     return memberships.filter((m) => m.membershipStatus === 'Active').length;
   }, [memberships]);
 
-  // Export CSV of members
   const handleExportCSV = () => {
     const listToExport = filteredMemberships;
     if (listToExport.length === 0) {
@@ -1754,33 +1975,6 @@ export default function CareCellsAdminPage() {
                 </div>
               </div>
 
-              {/* Top Cell Filter Chips */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                <button
-                  onClick={() => setSelectedCellFilter('ALL')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                    selectedCellFilter === 'ALL'
-                      ? 'bg-slate-900 text-white shadow-sm'
-                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                  }`}
-                >
-                  All Cells ({cells.length})
-                </button>
-                {cells.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setSelectedCellFilter(c.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                      selectedCellFilter === c.id
-                        ? 'bg-slate-900 text-white shadow-sm'
-                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
-                  >
-                    {c.cellCode} ({c.name})
-                  </button>
-                ))}
-              </div>
-
               {/* Direct Leadership Actions Row */}
               <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-sm">
                 <div className="flex items-center justify-between">
@@ -1881,7 +2075,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 2: CARE CELLS MANAGEMENT (Cards with Leader, Capacity, Edit, Delete)   */}
+          {/* TAB 2: CARE CELLS MANAGEMENT                                              */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'manage' && (
             <div className="space-y-6">
@@ -2075,7 +2269,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 3: MEMBERS DIRECTORY (Active Cell Banner, Add Members Modal Trigger)   */}
+          {/* TAB 3: MEMBERS DIRECTORY                                                  */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'members' && (
             <div className="space-y-6">
@@ -2109,7 +2303,7 @@ export default function CareCellsAdminPage() {
                 })}
               </div>
 
-              {/* Active Cell Banner Matching Mobile CareCellMembersTab */}
+              {/* Active Cell Banner */}
               {activeSelectedCell && (
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                   <div className="space-y-1">
@@ -2259,7 +2453,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 4: MEMBER LOCATIONS (Interactive Map vs List View, Multi-stop Route)  */}
+          {/* TAB 4: MEMBER LOCATIONS                                                   */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'locations' && (
             <div className="space-y-6">
@@ -2333,7 +2527,7 @@ export default function CareCellsAdminPage() {
                     onClick={() => setLocationsLocalityFilter(loc)}
                     className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 ${
                       locationsLocalityFilter === loc
-                        ? 'bg-slate-900 text-white'
+                        ? 'bg-slate-900 text-white font-bold'
                         : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -2490,7 +2684,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 5: MEETINGS (Mobile CareCellMeetingsTab Exact Parity)                   */}
+          {/* TAB 5: MEETINGS                                                           */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'meetings' && (
             <div className="space-y-6">
@@ -2521,7 +2715,7 @@ export default function CareCellsAdminPage() {
                 ))}
               </div>
 
-              {/* Period & Schedule Meeting Row Matching Mobile */}
+              {/* Period & Schedule Meeting Row */}
               <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <button
@@ -2548,19 +2742,6 @@ export default function CareCellsAdminPage() {
                   <CalendarPlus className="w-4 h-4" />
                   Schedule Meeting
                 </Button>
-              </div>
-
-              {/* Status Filter Chips */}
-              <div className="flex items-center gap-2">
-                {(['All', 'Upcoming', 'Completed', 'Cancelled'] as const).map((st) => (
-                  <button
-                    key={st}
-                    onClick={() => {}}
-                    className="px-3 py-1 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700"
-                  >
-                    {st}
-                  </button>
-                ))}
               </div>
 
               {/* Meetings List */}
@@ -2712,7 +2893,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 6: ATTENDANCE (Roll-call with Present / Absent / Late Pills)           */}
+          {/* TAB 6: ATTENDANCE                                                         */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'attendance' && (
             <div className="space-y-6">
@@ -2815,122 +2996,364 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 7: VISITS (Pastoral Home & Hospital Care Visits)                       */}
+          {/* TAB 7: VISITS (Exact Mobile Parity CareCellVisitsTab - Screenshot 1)      */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'visits' && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">Pastoral Care Visits</h3>
-                  <p className="text-xs text-slate-500">Track home and hospital visitations for church families</p>
+              {/* Top Cell Selector Row & Schedule Button matching Mobile */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1 flex-1">
+                  <button
+                    onClick={() => setSelectedCellFilter('ALL')}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      selectedCellFilter === 'ALL'
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    All Cells ({cells.length})
+                  </button>
+                  {cells.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedCellFilter(c.id)}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                        selectedCellFilter === c.id
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {c.cellCode}
+                    </button>
+                  ))}
                 </div>
+
                 <Button
                   onClick={openScheduleVisitModal}
-                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm px-4 py-2 flex-shrink-0"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  Schedule Visit
+                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                  + Schedule
                 </Button>
               </div>
 
-              {visits.length === 0 ? (
-                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
-                  No pastoral visits logged yet. Click "Schedule Visit" to log a visit.
+              {/* 3 Spacious KPI Metrics Cards matching Screenshot 1 */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {/* Total Visits Card */}
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-1">
+                  <div className="flex items-center gap-2 text-slate-700">
+                    <Home className="w-4 h-4" />
+                    <span className="text-xl font-black text-slate-900">{visitMetrics.totalVisits}</span>
+                  </div>
+                  <p className="text-xs font-bold text-slate-600">Total Visits</p>
+                </div>
+
+                {/* Accepted Card */}
+                <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4 shadow-sm space-y-1">
+                  <div className="flex items-center gap-2 text-emerald-700">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span className="text-xl font-black text-emerald-700">{visitMetrics.totalAccepted}</span>
+                  </div>
+                  <p className="text-xs font-bold text-emerald-800">Accepted</p>
+                </div>
+
+                {/* Pending Card */}
+                <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-4 shadow-sm space-y-1">
+                  <div className="flex items-center gap-2 text-amber-700">
+                    <Clock className="w-4 h-4 text-amber-600" />
+                    <span className="text-xl font-black text-amber-700">{visitMetrics.totalPending}</span>
+                  </div>
+                  <p className="text-xs font-bold text-amber-800">Pending</p>
+                </div>
+              </div>
+
+              {/* Status Filter Tabs */}
+              <div className="flex items-center gap-2">
+                {(['ALL', 'Scheduled', 'Completed', 'Cancelled'] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setVisitStatusFilter(st)}
+                    className={`px-4 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      visitStatusFilter === st
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+
+              {/* Visits List matching Screenshot 1 */}
+              {filteredVisits.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+                  <Home className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-700">No Visit Notifications Found</h3>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Schedule a pastoral or fellowship visit to send instant in-app & push notifications to all assigned
+                    members with Accept & Decline confirmation.
+                  </p>
+                  <Button
+                    onClick={openScheduleVisitModal}
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1.5" />
+                    Schedule First Visit
+                  </Button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {visits.map((v) => (
-                    <div key={v.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
-                          {v.purpose}
-                        </span>
-                        <span
-                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
-                            v.status === 'Completed'
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : 'bg-blue-50 text-blue-700'
-                          }`}
-                        >
-                          {v.status}
-                        </span>
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {filteredVisits.map((v) => {
+                    const total = v.totalMembersCount || 0;
+                    const accepted = v.acceptedCount || 0;
+                    const declined = v.declinedCount || 0;
+                    const pending = v.pendingCount !== undefined ? v.pendingCount : Math.max(0, total - accepted - declined);
+                    const acceptRate = total > 0 ? Math.round((accepted / total) * 100) : 0;
 
-                      <div>
-                        <h4 className="text-xs font-extrabold text-slate-900">{v.memberName}</h4>
-                        <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                          <Phone className="w-3 h-3 text-slate-400" />
-                          <span>{v.memberPhone || 'No phone'}</span>
-                        </p>
-                      </div>
+                    const isScheduled = v.status === 'Scheduled';
+                    const isCompleted = v.status === 'Completed';
+                    const isCancelled = v.status === 'Cancelled';
 
-                      <div className="text-xs text-slate-600 space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                          <span>{v.visitDate} {v.visitTime ? `at ${v.visitTime}` : ''}</span>
-                        </div>
-                        {v.location && (
-                          <div className="flex items-center gap-1.5 truncate">
-                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                            <span className="truncate">{v.location}</span>
+                    return (
+                      <div
+                        key={v.id}
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow space-y-4"
+                      >
+                        {/* Top Header Row matching Mobile */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                              <Building2 className="w-3 h-3 text-slate-500" />
+                              {v.cellCode || 'Rhema_CareCell-001'}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-500">{v.cellName}</span>
                           </div>
-                        )}
-                        {v.assignedVisitors && (
-                          <p className="text-[11px] text-slate-500 pt-1">
-                            Team: <span className="font-semibold text-slate-700">{v.assignedVisitors}</span>
-                          </p>
-                        )}
-                      </div>
 
-                      {v.notes && <p className="text-xs text-slate-500 italic">"{v.notes}"</p>}
-
-                      {v.status !== 'Completed' && (
-                        <div className="pt-2 border-t border-slate-100 flex justify-end">
-                          <button
-                            onClick={() => handleMarkVisitCompleted(v)}
-                            className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200"
+                          <span
+                            className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+                              isCompleted
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : isCancelled
+                                ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}
                           >
-                            Mark Completed
+                            {v.status}
+                          </span>
+                        </div>
+
+                        {/* Title */}
+                        <h3 className="text-lg font-black text-slate-900 tracking-tight">{v.title}</h3>
+
+                        {/* Date & Time Row */}
+                        <div className="flex items-center gap-4 text-xs text-slate-600 font-semibold">
+                          <div className="flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{v.visitDate}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                            <span>{v.visitTime}</span>
+                          </div>
+                        </div>
+
+                        {/* Visiting Team Pill */}
+                        <div className="p-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs flex items-center gap-2 text-slate-800 font-semibold">
+                          <Users className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Visiting: {v.visitors || 'Pastor & Cell Leader'}</span>
+                        </div>
+
+                        {/* Live Member Responses Summary Box matching Screenshot 1 */}
+                        <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                          <div className="grid grid-cols-4 text-center divide-x divide-slate-200">
+                            <div>
+                              <p className="text-base font-black text-emerald-600">{accepted}</p>
+                              <p className="text-[10px] font-bold text-slate-500">Accepted</p>
+                            </div>
+                            <div>
+                              <p className="text-base font-black text-rose-600">{declined}</p>
+                              <p className="text-[10px] font-bold text-slate-500">Declined</p>
+                            </div>
+                            <div>
+                              <p className="text-base font-black text-amber-600">{pending}</p>
+                              <p className="text-[10px] font-bold text-slate-500">Pending</p>
+                            </div>
+                            <div>
+                              <p className="text-base font-black text-slate-900">{total}</p>
+                              <p className="text-[10px] font-bold text-slate-500">Total</p>
+                            </div>
+                          </div>
+
+                          {/* Progress Bar */}
+                          <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 rounded-full transition-all"
+                              style={{ width: `${acceptRate}%` }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Card Actions Row 1 */}
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <button
+                            onClick={() => {
+                              setSelectedVisitForResponses(v);
+                              setResponsesFilter('ALL');
+                              setResponsesSearchQuery('');
+                            }}
+                            className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                          >
+                            <Users className="w-3.5 h-3.5 text-slate-600" />
+                            Responses ({total}) <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+                          </button>
+
+                          <div className="flex items-center gap-1.5">
+                            {isScheduled && (
+                              <button
+                                onClick={() => handleUpdateVisitStatus(v, 'Completed')}
+                                title="Mark Completed"
+                                className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl transition-colors"
+                              >
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              </button>
+                            )}
+                            {isScheduled && (
+                              <button
+                                onClick={() => handleUpdateVisitStatus(v, 'Cancelled')}
+                                title="Mark Cancelled"
+                                className="p-2 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl transition-colors"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleDeleteVisit(v)}
+                              title="Delete Visit"
+                              className="p-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Card Actions Row 2 (Route Map & Directions) */}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            onClick={() => {
+                              const queryStr = encodeURIComponent(v.location || activeSelectedCell?.location || 'Koilakuntla');
+                              window.open(`https://www.google.com/maps/search/?api=1&query=${queryStr}`, '_blank');
+                            }}
+                            className="py-1.5 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                          >
+                            <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                            Route Map
+                          </button>
+                          <button
+                            onClick={() => {
+                              const destStr = encodeURIComponent(v.location || activeSelectedCell?.location || 'Koilakuntla');
+                              window.open(`https://www.google.com/maps/dir/?api=1&destination=${destStr}`, '_blank');
+                            }}
+                            className="py-1.5 px-3 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5"
+                          >
+                            <Navigation className="w-3.5 h-3.5 text-slate-500" />
+                            Directions
                           </button>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 8: FOLLOW-UPS (Retention & Care for Inactive Members)                   */}
+          {/* TAB 8: FOLLOW-UPS (Exact Mobile Parity - Screenshot 2)                     */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'followups' && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">Member Care Follow-ups</h3>
-                  <p className="text-xs text-slate-500">Reach out to absent or inactive believers</p>
-                </div>
-                <Button
-                  onClick={() => openLogFollowupModal()}
-                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              {/* Top Cell Selector Row matching Screenshot 2 */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <button
+                  onClick={() => setSelectedCellFilter('ALL')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    selectedCellFilter === 'ALL'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  Log Follow-up
+                  ALL CELLS
+                </button>
+                {cells.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedCellFilter(c.id)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      selectedCellFilter === c.id
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {c.cellCode}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search & Action Row matching Screenshot 2 */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="relative flex-1 max-w-md">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search member, notes, or reason"
+                    value={followupSearchQuery}
+                    onChange={(e) => setFollowupSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900"
+                  />
+                </div>
+
+                <Button
+                  onClick={openLogFollowupModal}
+                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm px-4 py-2"
+                >
+                  <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                  + Log
                 </Button>
               </div>
 
-              {followups.length === 0 ? (
-                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
-                  No active follow-ups logged. Click "Log Follow-up" to record pastoral outreach.
+              {/* Status Filter Chips Row matching Screenshot 2 */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                {(['ALL', 'Pending', 'Contacted', 'Completed', 'Needs Further Follow-up'] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setFollowupStatusFilter(st)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      followupStatusFilter === st
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+
+              {/* Empty State matching Screenshot 2 */}
+              {filteredFollowups.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center space-y-3 shadow-sm">
+                  <Heart className="w-14 h-14 text-slate-300 stroke-1 mx-auto" />
+                  <h3 className="text-base font-extrabold text-slate-900">No Follow-ups Logged</h3>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Tap "+ Log" above to record pastoral visits, phone calls, or spiritual check-ins.
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {followups.map((f) => (
+                  {filteredFollowups.map((f) => (
                     <div key={f.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
-                          {f.reason}
+                          {f.reason || 'Pastoral Care'}
                         </span>
                         <span
                           className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
@@ -2951,7 +3374,10 @@ export default function CareCellsAdminPage() {
                         </p>
                       </div>
 
-                      {f.notes && <p className="text-xs text-slate-600 line-clamp-2">"{f.notes}"</p>}
+                      <div className="text-xs text-slate-600">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase block">Channel: {f.followupType}</span>
+                        {f.notes && <p className="italic mt-0.5 text-slate-700">"{f.notes}"</p>}
+                      </div>
 
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                         <div className="flex items-center gap-1.5">
@@ -2992,54 +3418,88 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* TAB 9: NOTICES & PRAYER REQUESTS                                          */}
+          {/* TAB 9: NOTICES & PRAYER (Exact Mobile Parity - Screenshot 3)                */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'announcements' && (
             <div className="space-y-6">
-              {/* Segmented Toggle Bar */}
-              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                <div className="flex items-center bg-slate-100 p-1 rounded-xl">
-                  <button
-                    onClick={() => setAnnouncePrayerSection('prayers')}
-                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                      announcePrayerSection === 'prayers'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Prayer Petitions ({prayers.length})
-                  </button>
-                  <button
-                    onClick={() => setAnnouncePrayerSection('announcements')}
-                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                      announcePrayerSection === 'announcements'
-                        ? 'bg-white text-slate-900 shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Cell Notices ({notices.length})
-                  </button>
-                </div>
-
-                <Button
-                  onClick={() =>
-                    announcePrayerSection === 'prayers' ? setPrayerModalOpen(true) : setNoticeModalOpen(true)
-                  }
-                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+              {/* Segmented Toggle Buttons matching Screenshot 3 */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setAnnouncePrayerSection('prayers')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                    announcePrayerSection === 'prayers'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  {announcePrayerSection === 'prayers' ? 'Add Prayer Request' : 'Broadcast Notice'}
-                </Button>
+                  <HeartHandshake className="w-4 h-4" />
+                  Prayer Requests ({filteredPrayers.length})
+                </button>
+                <button
+                  onClick={() => setAnnouncePrayerSection('announcements')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                    announcePrayerSection === 'announcements'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Megaphone className="w-4 h-4" />
+                  Announcements ({filteredNotices.length})
+                </button>
+
+                <div className="ml-auto">
+                  <Button
+                    onClick={() =>
+                      announcePrayerSection === 'prayers' ? setPrayerModalOpen(true) : setNoticeModalOpen(true)
+                    }
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5 stroke-[3]" />
+                    {announcePrayerSection === 'prayers' ? 'Add Prayer' : 'Broadcast Notice'}
+                  </Button>
+                </div>
               </div>
 
+              {/* Cell Selector Chips Row matching Screenshot 3 */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <button
+                  onClick={() => setSelectedCellFilter('ALL')}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    selectedCellFilter === 'ALL'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  ALL CELLS
+                </button>
+                {cells.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedCellFilter(c.id)}
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      selectedCellFilter === c.id
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    {c.cellCode}
+                  </button>
+                ))}
+              </div>
+
+              {/* Empty States matching Screenshot 3 */}
               {announcePrayerSection === 'prayers' ? (
-                prayers.length === 0 ? (
-                  <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
-                    No cell prayer petitions registered. Click "Add Prayer Request" to log a prayer petition.
+                filteredPrayers.length === 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center space-y-3 shadow-sm">
+                    <HeartHandshake className="w-14 h-14 text-slate-300 stroke-1 mx-auto" />
+                    <h3 className="text-base font-extrabold text-slate-900">No Prayer Requests</h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      No requests currently submitted in this care cell group.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {prayers.map((p) => (
+                    {filteredPrayers.map((p) => (
                       <div key={p.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">
@@ -3053,13 +3513,17 @@ export default function CareCellsAdminPage() {
                     ))}
                   </div>
                 )
-              ) : notices.length === 0 ? (
-                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
-                  No cell announcements broadcasted yet. Click "Broadcast Notice" to create one.
+              ) : filteredNotices.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center space-y-3 shadow-sm">
+                  <Megaphone className="w-14 h-14 text-slate-300 stroke-1 mx-auto" />
+                  <h3 className="text-base font-extrabold text-slate-900">No Announcements</h3>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    No announcements broadcasted to this care cell group.
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {notices.map((n) => (
+                  {filteredNotices.map((n) => (
                     <div key={n.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
@@ -3077,7 +3541,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 1: ADD MEMBERS MODAL (Exact Mobile Parity MemberLookupModal)        */}
+          {/* MODAL: ADD MEMBERS MODAL (MemberLookupModal)                              */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {showAddMembersModal && addMembersTargetCell && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
@@ -3315,12 +3779,646 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 2: CREATE / EDIT CARE CELL MODAL (CareCellFormModal)                */}
+          {/* MODAL: MEMBER RESPONSES BREAKDOWN MODAL (CareCellVisitResponsesModal)     */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {selectedVisitForResponses && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                {/* Header */}
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900">{selectedVisitForResponses.title}</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {selectedVisitForResponses.cellName} · {selectedVisitForResponses.visitDate} at {selectedVisitForResponses.visitTime}
+                    </p>
+                  </div>
+                  <button onClick={() => setSelectedVisitForResponses(null)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Response Filter Tabs */}
+                <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5 overflow-x-auto">
+                  {(['ALL', 'Accepted', 'Declined', 'Pending'] as const).map((tab) => {
+                    const count =
+                      tab === 'ALL'
+                        ? selectedVisitForResponses.totalMembersCount || 0
+                        : tab === 'Accepted'
+                        ? selectedVisitForResponses.acceptedCount || 0
+                        : tab === 'Declined'
+                        ? selectedVisitForResponses.declinedCount || 0
+                        : selectedVisitForResponses.pendingCount || 0;
+                    return (
+                      <button
+                        key={tab}
+                        onClick={() => setResponsesFilter(tab)}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                          responsesFilter === tab
+                            ? 'bg-slate-900 text-white shadow-sm'
+                            : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {tab} ({count})
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Search */}
+                <div className="p-3 border-b border-slate-100">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search member name or phone..."
+                      value={responsesSearchQuery}
+                      onChange={(e) => setResponsesSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                {/* Responses List */}
+                <div className="p-4 overflow-y-auto space-y-3 flex-1">
+                  {Object.values(selectedVisitForResponses.responses || {})
+                    .filter((r) => {
+                      if (responsesFilter !== 'ALL' && r.response !== responsesFilter) return false;
+                      if (responsesSearchQuery.trim()) {
+                        const q = responsesSearchQuery.toLowerCase();
+                        return (
+                          r.memberName.toLowerCase().includes(q) ||
+                          (r.memberPhone && r.memberPhone.includes(q))
+                        );
+                      }
+                      return true;
+                    })
+                    .map((r) => {
+                      const isAccepted = r.response === 'Accepted';
+                      const isDeclined = r.response === 'Declined';
+                      const isPending = r.response === 'Pending' || !r.response;
+
+                      return (
+                        <div key={r.memberId} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="text-xs font-extrabold text-slate-900">{r.memberName}</h4>
+                              <p className="text-[11px] text-slate-500">{r.memberPhone || 'No phone'}</p>
+                            </div>
+
+                            <span
+                              className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                                isAccepted
+                                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  : isDeclined
+                                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                  : 'bg-amber-50 text-amber-700 border border-amber-200'
+                              }`}
+                            >
+                              {r.response || 'Pending'}
+                            </span>
+                          </div>
+
+                          {r.preferredTime && (
+                            <p className="text-[11px] text-indigo-700 bg-indigo-50 border border-indigo-100 p-1.5 rounded-lg font-medium">
+                              Preferred Time: {r.preferredTime}
+                            </p>
+                          )}
+
+                          {/* Quick Operations */}
+                          <div className="flex items-center justify-between pt-1 border-t border-slate-200/60">
+                            <div className="flex items-center gap-1.5">
+                              {r.memberPhone && (
+                                <a
+                                  href={`tel:${r.memberPhone}`}
+                                  className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 text-[10px] font-bold rounded-lg border border-slate-200"
+                                >
+                                  Call
+                                </a>
+                              )}
+                              {r.memberPhone && (
+                                <a
+                                  href={`https://wa.me/${r.memberPhone.replace(/\D/g, '')}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-lg border border-emerald-200"
+                                >
+                                  WhatsApp
+                                </a>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => handleToggleMemberResponse(selectedVisitForResponses.id, r.memberId, 'Accepted')}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded-lg ${
+                                  isAccepted ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => handleToggleMemberResponse(selectedVisitForResponses.id, r.memberId, 'Declined')}
+                                className={`px-2 py-0.5 text-[10px] font-bold rounded-lg ${
+                                  isDeclined ? 'bg-rose-600 text-white' : 'bg-white text-slate-600 border border-slate-200'
+                                }`}
+                              >
+                                Decline
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL: SCHEDULE VISIT NOTIFICATION MODAL (CareCellVisitModal)             */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {createVisitModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900">Schedule Pastoral Visit</h3>
+                    <p className="text-xs text-slate-500">Notify cell members and track Accept/Decline responses</p>
+                  </div>
+                  <button onClick={() => setCreateVisitModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form id="visit-modal-form" onSubmit={handleSaveVisitNotification} className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                  {/* Care Cell */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
+                    <select
+                      value={visitFormCellId}
+                      onChange={(e) => setVisitFormCellId(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Title Presets */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Visit Title *</label>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                      {VISIT_TITLE_PRESETS.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setVisitFormTitle(t)}
+                          className={`px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                            visitFormTitle === t
+                              ? 'bg-slate-900 text-white font-bold'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      placeholder="e.g. Pastoral Home Visit"
+                      value={visitFormTitle}
+                      onChange={(e) => setVisitFormTitle(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  {/* Date & Time */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Visit Date *</label>
+                      <input
+                        type="date"
+                        value={visitFormDate}
+                        onChange={(e) => setVisitFormDate(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Visit Time *</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 5:00 PM"
+                        value={visitFormTime}
+                        onChange={(e) => setVisitFormTime(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Visitors */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Visiting Team *</label>
+                    <input
+                      type="text"
+                      placeholder="Pastor & Cell Leader"
+                      value={visitFormVisitors}
+                      onChange={(e) => setVisitFormVisitors(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  {/* Purpose */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Purpose / Scripture Focus</label>
+                    <textarea
+                      placeholder="Pastoral encouragement, praying for household peace, or hospital comfort..."
+                      value={visitFormPurpose}
+                      onChange={(e) => setVisitFormPurpose(e.target.value)}
+                      rows={2}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  {/* Visit Scope */}
+                  <div className="space-y-2 pt-1 border-t border-slate-100">
+                    <label className="text-xs font-bold text-slate-700">Recipient Scope</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setVisitScope('ALL')}
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left ${
+                          visitScope === 'ALL'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        All Cell Members
+                        <span className="block text-[10px] font-normal opacity-80 mt-0.5">
+                          Notify all assigned members
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setVisitScope('SPECIFIC')}
+                        className={`p-2.5 rounded-xl border text-xs font-bold text-left ${
+                          visitScope === 'SPECIFIC'
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        Specific Members
+                        <span className="block text-[10px] font-normal opacity-80 mt-0.5">
+                          Choose individual families
+                        </span>
+                      </button>
+                    </div>
+
+                    {visitScope === 'SPECIFIC' && (
+                      <div className="max-h-36 overflow-y-auto divide-y divide-slate-100 bg-slate-50 rounded-xl border border-slate-200 p-2 space-y-1">
+                        {memberships
+                          .filter((m) => m.cellId === visitFormCellId && m.membershipStatus === 'Active')
+                          .map((mem) => {
+                            const isChecked = visitSelectedMemberIds.includes(mem.memberId);
+                            return (
+                              <div
+                                key={mem.id}
+                                onClick={() => {
+                                  setVisitSelectedMemberIds((prev) =>
+                                    isChecked ? prev.filter((id) => id !== mem.memberId) : [...prev, mem.memberId]
+                                  );
+                                }}
+                                className="p-2 flex items-center justify-between text-xs cursor-pointer hover:bg-white rounded-lg"
+                              >
+                                <span className="font-semibold text-slate-900">{mem.memberName}</span>
+                                <div
+                                  className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                    isChecked ? 'bg-slate-900 border-slate-900 text-white' : 'border-slate-300 bg-white'
+                                  }`}
+                                >
+                                  {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+                </form>
+
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={() => setCreateVisitModalOpen(false)} className="rounded-xl text-xs font-bold">
+                    Cancel
+                  </Button>
+                  <Button form="visit-modal-form" type="submit" disabled={savingVisit} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold px-5">
+                    {savingVisit ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Schedule Visit Notification'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL: LOG PASTORAL FOLLOW-UP (CareCellFollowupModal)                      */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {followupModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-rose-50 text-rose-600 rounded-xl border border-rose-100">
+                      <Heart className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900">Pastoral Follow-up</h3>
+                      <p className="text-xs text-slate-500">Log spiritual care check-in or absent member outreach</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setFollowupModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form id="followup-form" onSubmit={handleSaveFollowup} className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                  {/* Care Cell */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
+                    <select
+                      value={followupFormCellId}
+                      onChange={(e) => setFollowupFormCellId(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Member Name */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Member *</label>
+                    <select
+                      value={followupFormMemberId}
+                      onChange={(e) => {
+                        const m = memberships.find((mem) => mem.memberId === e.target.value);
+                        setFollowupFormMemberId(e.target.value);
+                        if (m) {
+                          setFollowupFormMemberName(m.memberName);
+                          setFollowupFormMemberPhone(m.memberPhone || '');
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      <option value="">Select cell member...</option>
+                      {memberships
+                        .filter((m) => m.cellId === followupFormCellId && m.membershipStatus === 'Active')
+                        .map((m) => (
+                          <option key={m.memberId} value={m.memberId}>
+                            {m.memberName} ({m.memberPhone || 'No phone'})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {/* Channel Chips */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Channel</label>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                      {FOLLOWUP_TYPES.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => setFollowupFormType(t as any)}
+                          className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                            followupFormType === t
+                              ? 'bg-slate-900 text-white shadow-sm'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Reason Presets */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Reason</label>
+                    <select
+                      value={followupFormReason}
+                      onChange={(e) => setFollowupFormReason(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      {FOLLOWUP_REASONS.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Notes */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Pastoral Notes / Outcomes *</label>
+                    <textarea
+                      placeholder="Spoke with member, prayed for healing, confirmed next meeting attendance..."
+                      value={followupFormNotes}
+                      onChange={(e) => setFollowupFormNotes(e.target.value)}
+                      required
+                      rows={3}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  {/* Next Action Date */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Next Follow-up Date</label>
+                    <input
+                      type="date"
+                      value={followupFormNextDate}
+                      onChange={(e) => setFollowupFormNextDate(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+                </form>
+
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
+                  <Button type="button" variant="outline" onClick={() => setFollowupModalOpen(false)} className="rounded-xl text-xs font-bold">
+                    Cancel
+                  </Button>
+                  <Button form="followup-form" type="submit" disabled={savingFollowup} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold px-5">
+                    {savingFollowup ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Log Follow-up'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL: BROADCAST NOTICE MODAL                                             */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {noticeModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Broadcast Cell Notice</h3>
+                  <button onClick={() => setNoticeModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSaveNotice} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Target Cell</label>
+                    <select
+                      value={noticeCellId}
+                      onChange={(e) => setNoticeCellId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      <option value="">All Care Cells</option>
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Title *</label>
+                    <input
+                      type="text"
+                      placeholder="Notice headline..."
+                      value={noticeTitle}
+                      onChange={(e) => setNoticeTitle(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Message *</label>
+                    <textarea
+                      placeholder="Announcement body text..."
+                      value={noticeMessage}
+                      onChange={(e) => setNoticeMessage(e.target.value)}
+                      required
+                      rows={3}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button type="button" variant="outline" onClick={() => setNoticeModalOpen(false)} className="rounded-xl text-xs font-bold">
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={savingNotice} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
+                      {savingNotice ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Publish Notice'}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL: ADD PRAYER PETITION MODAL                                          */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {prayerModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Add Prayer Request</h3>
+                  <button onClick={() => setPrayerModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleSavePrayer} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell</label>
+                    <select
+                      value={prayerCellId}
+                      onChange={(e) => setPrayerCellId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      <option value="">All Care Cells</option>
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Member Name *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. David Abraham"
+                      value={prayerMemberName}
+                      onChange={(e) => setPrayerMemberName(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Category</label>
+                    <select
+                      value={prayerCategory}
+                      onChange={(e) => setPrayerCategory(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      <option value="Healing / Health">Healing / Health</option>
+                      <option value="Family / Children">Family / Children</option>
+                      <option value="Financial / Job">Financial / Job</option>
+                      <option value="Spiritual Growth">Spiritual Growth</option>
+                      <option value="Thanksgiving">Thanksgiving</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Prayer Petition *</label>
+                    <textarea
+                      placeholder="Please pray for..."
+                      value={prayerRequestText}
+                      onChange={(e) => setPrayerRequestText(e.target.value)}
+                      required
+                      rows={3}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button type="button" variant="outline" onClick={() => setPrayerModalOpen(false)} className="rounded-xl text-xs font-bold">
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={savingPrayer} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
+                      {savingPrayer ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Prayer Request'}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL: CREATE / EDIT CARE CELL MODAL                                      */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {modalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
-                {/* Header */}
                 <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
@@ -3340,9 +4438,7 @@ export default function CareCellsAdminPage() {
                   </button>
                 </div>
 
-                {/* Form Body */}
                 <form id="care-cell-form" onSubmit={handleSaveCell} className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
-                  {/* Name */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Care Cell Name *</label>
                     <input
@@ -3355,7 +4451,6 @@ export default function CareCellsAdminPage() {
                     />
                   </div>
 
-                  {/* Code */}
                   <div className="space-y-1">
                     <div className="flex justify-between items-center">
                       <label className="text-xs font-bold text-slate-700">Care Cell Code *</label>
@@ -3381,7 +4476,6 @@ export default function CareCellsAdminPage() {
                     <p className="text-[10px] text-slate-400">Standard format: Rhema_CareCell-001, Rhema_CareCell-002</p>
                   </div>
 
-                  {/* Description */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Description</label>
                     <textarea
@@ -3393,7 +4487,6 @@ export default function CareCellsAdminPage() {
                     />
                   </div>
 
-                  {/* Location / Area */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Location / Area</label>
                     <input
@@ -3405,7 +4498,6 @@ export default function CareCellsAdminPage() {
                     />
                   </div>
 
-                  {/* Leader Selection */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Cell Leader (Existing Church Member) *</label>
                     {formLeaderName ? (
@@ -3445,7 +4537,6 @@ export default function CareCellsAdminPage() {
                     )}
                   </div>
 
-                  {/* Assistant Leader Selection */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Assistant Leader (Optional)</label>
                     {formAssistantName ? (
@@ -3487,7 +4578,6 @@ export default function CareCellsAdminPage() {
                     )}
                   </div>
 
-                  {/* Location-Based Assigned Members Section */}
                   <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
@@ -3556,7 +4646,6 @@ export default function CareCellsAdminPage() {
                     )}
                   </div>
 
-                  {/* Meeting Day Chips */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Meeting Day *</label>
                     <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -3577,7 +4666,6 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Times (2 Columns) */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-slate-700">Starting Time *</label>
@@ -3600,7 +4688,6 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Meeting Location */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Meeting Location / Address</label>
                     <input
@@ -3612,7 +4699,6 @@ export default function CareCellsAdminPage() {
                     />
                   </div>
 
-                  {/* Capacity & Status */}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-slate-700">Max Capacity</label>
@@ -3642,7 +4728,6 @@ export default function CareCellsAdminPage() {
                   </div>
                 </form>
 
-                {/* Footer Actions */}
                 <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
                   <Button
                     type="button"
@@ -3732,12 +4817,11 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 3: SCHEDULE / EDIT MEETING MODAL (MeetingFormModal)                  */}
+          {/* MODAL: SCHEDULE / EDIT MEETING MODAL (MeetingFormModal)                   */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {meetingModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
-                {/* Header */}
                 <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
@@ -3755,9 +4839,7 @@ export default function CareCellsAdminPage() {
                   </button>
                 </div>
 
-                {/* Form Body */}
                 <form id="meeting-form" onSubmit={handleSaveMeeting} className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
-                  {/* Care Cell */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Care Cell *</label>
                     <select
@@ -3778,7 +4860,6 @@ export default function CareCellsAdminPage() {
                     </select>
                   </div>
 
-                  {/* Title */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Meeting Title *</label>
                     <input
@@ -3791,7 +4872,6 @@ export default function CareCellsAdminPage() {
                     />
                   </div>
 
-                  {/* Meeting Type Chips */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Meeting Type</label>
                     <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
@@ -3812,7 +4892,6 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Date & Time Row */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-slate-700">Date *</label>
@@ -3845,7 +4924,6 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Location */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Location / Venue</label>
                     <input
@@ -3959,7 +5037,6 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Description */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Notes / Agenda</label>
                     <textarea
@@ -3971,7 +5048,6 @@ export default function CareCellsAdminPage() {
                     />
                   </div>
 
-                  {/* Status */}
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-slate-700">Status</label>
                     <select
@@ -3986,7 +5062,6 @@ export default function CareCellsAdminPage() {
                   </div>
                 </form>
 
-                {/* Footer Actions */}
                 <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
                   <Button
                     type="button"
@@ -4010,7 +5085,7 @@ export default function CareCellsAdminPage() {
           )}
 
           {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 4: TRANSFER MEMBER MODAL                                            */}
+          {/* MODAL: TRANSFER MEMBER MODAL                                              */}
           {/* ───────────────────────────────────────────────────────────────────────── */}
           {transferModalOpen && memberToTransfer && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
@@ -4056,378 +5131,6 @@ export default function CareCellsAdminPage() {
                     {transferring ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Transfer'}
                   </Button>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 5: SCHEDULE PASTORAL VISIT MODAL                                    */}
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {visitModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-4 animate-in zoom-in-95">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-extrabold text-slate-900">Schedule Pastoral Visit</h3>
-                  <button onClick={() => setVisitModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveVisit} className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
-                    <select
-                      value={visitCellId}
-                      onChange={(e) => setVisitCellId(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      {cells.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.cellCode} — {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Member Name *</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Sakibanda Sunil Babu"
-                        value={visitMemberName}
-                        onChange={(e) => setVisitMemberName(e.target.value)}
-                        required
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Phone</label>
-                      <input
-                        type="tel"
-                        placeholder="+91..."
-                        value={visitMemberPhone}
-                        onChange={(e) => setVisitMemberPhone(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Date</label>
-                      <input
-                        type="date"
-                        value={visitDate}
-                        onChange={(e) => setVisitDate(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Time</label>
-                      <input
-                        type="time"
-                        value={visitTime}
-                        onChange={(e) => setVisitTime(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Visit Purpose</label>
-                    <select
-                      value={visitPurpose}
-                      onChange={(e) => setVisitPurpose(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      {VISIT_PURPOSES.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Address / Hospital</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Home address or hospital ward"
-                      value={visitLocation}
-                      onChange={(e) => setVisitLocation(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                    <Button type="button" variant="outline" onClick={() => setVisitModalOpen(false)} className="rounded-xl text-xs font-bold">
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={savingVisit} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
-                      {savingVisit ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Schedule Visit'}
-                    </Button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 6: LOG CARE FOLLOW-UP MODAL                                         */}
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {followupModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-4 animate-in zoom-in-95">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-extrabold text-slate-900">Log Care Follow-up</h3>
-                  <button onClick={() => setFollowupModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveFollowup} className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
-                    <select
-                      value={followupCellId}
-                      onChange={(e) => setFollowupCellId(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      {cells.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.cellCode} — {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Member Name *</label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Rajesh Yeddula"
-                        value={followupMemberName}
-                        onChange={(e) => setFollowupMemberName(e.target.value)}
-                        required
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Phone</label>
-                      <input
-                        type="tel"
-                        placeholder="+91..."
-                        value={followupMemberPhone}
-                        onChange={(e) => setFollowupMemberPhone(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Channel</label>
-                      <select
-                        value={followupType}
-                        onChange={(e) => setFollowupType(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                      >
-                        {FOLLOWUP_TYPES.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-700">Reason</label>
-                      <select
-                        value={followupReason}
-                        onChange={(e) => setFollowupReason(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                      >
-                        {FOLLOWUP_REASONS.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Notes / Action Taken</label>
-                    <textarea
-                      placeholder="Spoke with member, prayed for healing, confirmed next meeting attendance..."
-                      value={followupNotes}
-                      onChange={(e) => setFollowupNotes(e.target.value)}
-                      rows={3}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                    <Button type="button" variant="outline" onClick={() => setFollowupModalOpen(false)} className="rounded-xl text-xs font-bold">
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={savingFollowup} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
-                      {savingFollowup ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Log Follow-up'}
-                    </Button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 7: BROADCAST NOTICE MODAL                                           */}
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {noticeModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-extrabold text-slate-900">Broadcast Cell Notice</h3>
-                  <button onClick={() => setNoticeModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveNotice} className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Target Cell</label>
-                    <select
-                      value={noticeCellId}
-                      onChange={(e) => setNoticeCellId(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      <option value="">All Care Cells</option>
-                      {cells.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.cellCode} — {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Title *</label>
-                    <input
-                      type="text"
-                      placeholder="Notice headline..."
-                      value={noticeTitle}
-                      onChange={(e) => setNoticeTitle(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Message *</label>
-                    <textarea
-                      placeholder="Announcement body text..."
-                      value={noticeMessage}
-                      onChange={(e) => setNoticeMessage(e.target.value)}
-                      required
-                      rows={3}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                    <Button type="button" variant="outline" onClick={() => setNoticeModalOpen(false)} className="rounded-xl text-xs font-bold">
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={savingNotice} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
-                      {savingNotice ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Publish Notice'}
-                    </Button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {/* MODAL 8: ADD PRAYER PETITION MODAL                                        */}
-          {/* ───────────────────────────────────────────────────────────────────────── */}
-          {prayerModalOpen && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-extrabold text-slate-900">Add Prayer Request</h3>
-                  <button onClick={() => setPrayerModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSavePrayer} className="space-y-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Care Cell</label>
-                    <select
-                      value={prayerCellId}
-                      onChange={(e) => setPrayerCellId(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      <option value="">All Care Cells</option>
-                      {cells.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.cellCode} — {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Member Name *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. David Abraham"
-                      value={prayerMemberName}
-                      onChange={(e) => setPrayerMemberName(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Category</label>
-                    <select
-                      value={prayerCategory}
-                      onChange={(e) => setPrayerCategory(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      <option value="Healing / Health">Healing / Health</option>
-                      <option value="Family / Children">Family / Children</option>
-                      <option value="Financial / Job">Financial / Job</option>
-                      <option value="Spiritual Growth">Spiritual Growth</option>
-                      <option value="Thanksgiving">Thanksgiving</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-slate-700">Prayer Petition *</label>
-                    <textarea
-                      placeholder="Please pray for..."
-                      value={prayerRequestText}
-                      onChange={(e) => setPrayerRequestText(e.target.value)}
-                      required
-                      rows={3}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                    <Button type="button" variant="outline" onClick={() => setPrayerModalOpen(false)} className="rounded-xl text-xs font-bold">
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={savingPrayer} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
-                      {savingPrayer ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Prayer Request'}
-                    </Button>
-                  </div>
-                </form>
               </div>
             </div>
           )}
