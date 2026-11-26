@@ -531,7 +531,25 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
     setQStatus(item.status || 'published');
     setQScheduledDate(item.scheduledDate || new Date().toISOString().slice(0, 10));
     setQScheduledTime(item.scheduledTime || '06:00');
-    setFormQuestions(Array.isArray(item.questions) && item.questions.length > 0 ? [...item.questions] : []);
+    const sanitizedQuestions = Array.isArray(item.questions)
+      ? item.questions.map((q) => {
+          if (q.questionType === 'single_choice') {
+            const currentOpts = Array.isArray(q.options) ? q.options : [];
+            const isTF = currentOpts.length === 2 && currentOpts[0] === 'True' && currentOpts[1] === 'False';
+            return {
+              ...q,
+              options: isTF || currentOpts.length < 4
+                ? (isTF ? ['', '', '', ''] : [...currentOpts, '', '', ''].slice(0, 4))
+                : currentOpts,
+              optionsTelugu: Array.isArray(q.optionsTelugu) && q.optionsTelugu.length >= 4
+                ? q.optionsTelugu
+                : ['', '', '', ''],
+            };
+          }
+          return q;
+        })
+      : [];
+    setFormQuestions(sanitizedQuestions);
     setQuizModalOpen(true);
   };
 
@@ -560,6 +578,58 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
     setFormQuestions((prev) => {
       const copy = [...prev];
       copy[idx] = { ...copy[idx], [field]: value };
+      return copy;
+    });
+  };
+
+  const handleToggleInlineQuestionType = (qIdx: number, newType: QuizQuestionType) => {
+    setFormQuestions((prev) => {
+      const copy = [...prev];
+      const targetQ = copy[qIdx];
+      if (!targetQ) return prev;
+
+      if (newType === 'true_false') {
+        const isCurrentAnsTF = targetQ.correctAnswer === 'True' || targetQ.correctAnswer === 'False';
+        copy[qIdx] = {
+          ...targetQ,
+          questionType: 'true_false',
+          options: ['True', 'False'],
+          optionsTelugu: ['నిజం', 'అబద్ధం'],
+          correctAnswer: isCurrentAnsTF ? targetQ.correctAnswer : '',
+        };
+      } else {
+        // Switching to single_choice (Multiple Choice)
+        const currentOpts = Array.isArray(targetQ.options) ? targetQ.options : [];
+        const isCurrentlyTF =
+          (currentOpts.length === 2 && currentOpts[0] === 'True' && currentOpts[1] === 'False') ||
+          (currentOpts.length === 4 && currentOpts[0] === 'True' && currentOpts[1] === 'False' && !currentOpts[2] && !currentOpts[3]);
+
+        let nextOpts: string[];
+        let nextOptsTe: string[];
+
+        if (isCurrentlyTF || currentOpts.length < 4) {
+          nextOpts = ['', '', '', ''];
+        } else {
+          nextOpts = [...currentOpts.slice(0, 4)];
+        }
+
+        const currentOptsTe = Array.isArray(targetQ.optionsTelugu) ? targetQ.optionsTelugu : [];
+        if (isCurrentlyTF || currentOptsTe.length < 4) {
+          nextOptsTe = ['', '', '', ''];
+        } else {
+          nextOptsTe = [...currentOptsTe.slice(0, 4)];
+        }
+
+        copy[qIdx] = {
+          ...targetQ,
+          questionType: 'single_choice',
+          options: nextOpts,
+          optionsTelugu: nextOptsTe,
+          correctAnswer: isCurrentlyTF || targetQ.correctAnswer === 'True' || targetQ.correctAnswer === 'False'
+            ? ''
+            : targetQ.correctAnswer,
+        };
+      }
       return copy;
     });
   };
@@ -713,19 +783,28 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
 
     const opts = Array.isArray(q.options) ? q.options : [];
     const optsTe = Array.isArray(q.optionsTelugu) ? q.optionsTelugu : [];
+    const isOptsTF = opts.length === 2 && opts[0] === 'True' && opts[1] === 'False';
     setQuestOptions(
       q.questionType === 'true_false'
         ? ['True', 'False']
+        : isOptsTF
+        ? ['', '', '', '']
         : opts.length >= 4
         ? opts
         : [...opts, '', '', ''].slice(0, 4)
     );
     setQuestOptionsTe(
-      optsTe.length >= 4
+      q.questionType === 'true_false'
+        ? ['నిజం', 'అబద్ధం']
+        : isOptsTF
+        ? ['', '', '', '']
+        : optsTe.length >= 4
         ? optsTe
         : [...optsTe, '', '', ''].slice(0, 4)
     );
-    setQuestCorrectAnswer(q.correctAnswer || '');
+    setQuestCorrectAnswer(
+      q.questionType === 'single_choice' && isOptsTF ? '' : (q.correctAnswer || '')
+    );
     setQuestBibleRef(q.bibleReference || '');
     setQuestExplanation(q.explanation || '');
     setQuestExplanationTe(q.explanationTelugu || '');
@@ -2330,7 +2409,7 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                             <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-lg text-[11px]">
                               <button
                                 type="button"
-                                onClick={() => handleUpdateInlineQuestion(qIdx, 'questionType', 'single_choice')}
+                                onClick={() => handleToggleInlineQuestionType(qIdx, 'single_choice')}
                                 className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
                                   q.questionType === 'single_choice'
                                     ? 'bg-black dark:bg-white text-white dark:text-black'
@@ -2341,10 +2420,7 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  handleUpdateInlineQuestion(qIdx, 'questionType', 'true_false');
-                                  handleUpdateInlineQuestion(qIdx, 'options', ['True', 'False']);
-                                }}
+                                onClick={() => handleToggleInlineQuestionType(qIdx, 'true_false')}
                                 className={`px-2 py-0.5 rounded-md font-bold transition-all cursor-pointer ${
                                   q.questionType === 'true_false'
                                     ? 'bg-black dark:bg-white text-white dark:text-black'
@@ -2377,8 +2453,12 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
 
                           {/* Options */}
                           <div className="space-y-2">
-                            {(q.questionType === 'true_false' ? ['True', 'False'] : q.options || []).map(
-                              (optVal, optIdx) => {
+                            {(q.questionType === 'true_false'
+                              ? ['True', 'False']
+                              : (Array.isArray(q.options) && q.options.length >= 4
+                                  ? q.options
+                                  : [...(Array.isArray(q.options) ? q.options : []), '', '', ''].slice(0, 4))
+                            ).map((optVal, optIdx) => {
                                 const isCorrect = q.correctAnswer === optVal && optVal.trim().length > 0;
                                 return (
                                   <div key={optIdx} className="flex items-center gap-2">
@@ -2393,7 +2473,18 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                                     >
                                       {isCorrect && <Check size={12} strokeWidth={3} />}
                                     </button>
-                                    <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                                    <div
+                                      onClick={() => {
+                                        if (q.questionType === 'true_false') {
+                                          handleSetInlineCorrectAnswer(qIdx, optVal);
+                                        }
+                                      }}
+                                      className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 ${
+                                        q.questionType === 'true_false'
+                                          ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900'
+                                          : ''
+                                      }`}
+                                    >
                                       <span className="font-bold text-slate-400 text-xs">
                                         {String.fromCharCode(65 + optIdx)}.
                                       </span>
@@ -2406,9 +2497,14 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                                           type="text"
                                           value={optVal}
                                           onChange={(e) => {
-                                            const copy = [...(q.options || [])];
-                                            copy[optIdx] = e.target.value;
-                                            handleUpdateInlineQuestion(qIdx, 'options', copy);
+                                            const current = Array.isArray(q.options) && q.options.length >= 4
+                                              ? [...q.options]
+                                              : [...(Array.isArray(q.options) ? q.options : []), '', '', ''].slice(0, 4);
+                                            current[optIdx] = e.target.value;
+                                            handleUpdateInlineQuestion(qIdx, 'options', current);
+                                            if (q.correctAnswer === optVal && optVal.trim().length > 0) {
+                                              handleSetInlineCorrectAnswer(qIdx, e.target.value);
+                                            }
                                           }}
                                           placeholder={`Option ${String.fromCharCode(65 + optIdx)}`}
                                           className="flex-1 bg-transparent border-none outline-none text-xs font-semibold"
@@ -2542,7 +2638,17 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                         type="button"
                         onClick={() => {
                           setQuestType('single_choice');
-                          if (questOptions.length < 4) setQuestOptions(['', '', '', '']);
+                          const isCurrentlyTF =
+                            (questOptions.length === 2 && questOptions[0] === 'True' && questOptions[1] === 'False') ||
+                            (questOptions.length === 4 && questOptions[0] === 'True' && questOptions[1] === 'False' && !questOptions[2] && !questOptions[3]);
+
+                          if (isCurrentlyTF || questOptions.length < 4) {
+                            setQuestOptions(['', '', '', '']);
+                            setQuestOptionsTe(['', '', '', '']);
+                          }
+                          if (isCurrentlyTF || questCorrectAnswer === 'True' || questCorrectAnswer === 'False') {
+                            setQuestCorrectAnswer('');
+                          }
                         }}
                         className={`py-2 rounded-xl border text-xs font-bold transition-all ${
                           questType === 'single_choice'
@@ -2557,6 +2663,10 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                         onClick={() => {
                           setQuestType('true_false');
                           setQuestOptions(['True', 'False']);
+                          setQuestOptionsTe(['నిజం', 'అబద్ధం']);
+                          if (questCorrectAnswer !== 'True' && questCorrectAnswer !== 'False') {
+                            setQuestCorrectAnswer('');
+                          }
                         }}
                         className={`py-2 rounded-xl border text-xs font-bold transition-all ${
                           questType === 'true_false'
@@ -2610,7 +2720,12 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                     </div>
 
                     <div className="space-y-2">
-                      {(questType === 'true_false' ? ['True', 'False'] : questOptions).map(
+                      {(questType === 'true_false'
+                        ? ['True', 'False']
+                        : (questOptions && questOptions.length >= 4
+                            ? questOptions
+                            : [...(questOptions || []), '', '', ''].slice(0, 4))
+                      ).map(
                         (opt, idx) => {
                           const isCorrect = questCorrectAnswer === opt && opt.trim().length > 0;
                           return (
@@ -2626,7 +2741,16 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                               >
                                 {isCorrect && <Check size={12} strokeWidth={3} />}
                               </button>
-                              <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950">
+                              <div
+                                onClick={() => {
+                                  if (questType === 'true_false') {
+                                    setQuestCorrectAnswer(opt);
+                                  }
+                                }}
+                                className={`flex-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 ${
+                                  questType === 'true_false' ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-900' : ''
+                                }`}
+                              >
                                 <span className="font-bold text-slate-400 text-xs">
                                   {String.fromCharCode(65 + idx)}.
                                 </span>
@@ -2639,9 +2763,14 @@ In which city was Jesus born?|Nazareth|Bethlehem|Jerusalem|Capernaum|Bethlehem|M
                                     type="text"
                                     value={opt}
                                     onChange={(e) => {
-                                      const copy = [...questOptions];
+                                      const copy = questOptions.length >= 4
+                                        ? [...questOptions]
+                                        : [...questOptions, '', '', ''].slice(0, 4);
                                       copy[idx] = e.target.value;
                                       setQuestOptions(copy);
+                                      if (questCorrectAnswer === opt && opt.trim().length > 0) {
+                                        setQuestCorrectAnswer(e.target.value);
+                                      }
                                     }}
                                     placeholder={`Choice ${String.fromCharCode(65 + idx)}`}
                                     className="flex-1 bg-transparent border-none outline-none text-xs font-semibold"
