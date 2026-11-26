@@ -21,6 +21,7 @@ import {
   Users,
   UserCheck,
   UserX,
+  UserPlus,
   TrendingUp,
   AlertTriangle,
   Clock,
@@ -50,6 +51,8 @@ import {
   Check,
   Shield,
   Award,
+  Building2,
+  PieChart,
 } from 'lucide-react';
 import QRCode from 'qrcode';
 
@@ -926,6 +929,22 @@ export default function AttendanceAdminPage() {
     return { total, todayCount, avgTurnout };
   }, [eventsList]);
 
+  // Timeline Counts by Filter Tab (Matching Mobile Roster Pills)
+  const timelineCounts = useMemo(() => {
+    const all = eventsList.length;
+    const now = new Date();
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - now.getDay());
+    sunday.setHours(0, 0, 0, 0);
+    const saturday = new Date(sunday);
+    saturday.setDate(sunday.getDate() + 6);
+    saturday.setHours(23, 59, 59, 999);
+    const thisWeek = eventsList.filter((e) => e.dateObj >= sunday && e.dateObj <= saturday).length;
+    const upcoming = eventsList.filter((e) => e.status === 'Upcoming' || e.status === 'Today').length;
+    const past = eventsList.filter((e) => e.status === 'Past').length;
+    return { all, thisWeek, upcoming, past };
+  }, [eventsList]);
+
   // ─────────────────────────────────────────────────────────────────────────
   // LEGACY HEADCOUNT SAVE HANDLER (PRESERVED)
   // ─────────────────────────────────────────────────────────────────────────
@@ -965,6 +984,167 @@ export default function AttendanceAdminPage() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
+  // ATTENDANCE DISTRIBUTION DONUT CHART (EXACT MOBILE PARITY)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const renderDonutChart = () => {
+    const size = 180;
+    const strokeWidth = 16;
+    const center = size / 2;
+    const radius = center - strokeWidth;
+    const circumference = 2 * Math.PI * radius;
+
+    const total = Math.max(1, (selectedEvent?.totalExpected || 633) + guestAttendees.length);
+    const presentReg = Math.max(0, presentMembers.length - (selectedEvent?.familyCount || 0));
+    const family = selectedEvent?.familyCount || 0;
+    const guests = guestAttendees.length;
+    const absent = absentMembers.length;
+
+    const presentRegPct = presentReg / total;
+    const familyPct = family / total;
+    const guestsPct = guests / total;
+    const absentPct = absent / total;
+
+    const presentRegStroke = presentRegPct * circumference;
+    const familyStroke = familyPct * circumference;
+    const guestsStroke = guestsPct * circumference;
+    const absentStroke = absentPct * circumference;
+
+    let offset = 0;
+    const seg1Offset = offset;
+    offset += presentRegStroke;
+    const seg2Offset = offset;
+    offset += familyStroke;
+    const seg3Offset = offset;
+    offset += guestsStroke;
+    const seg4Offset = offset;
+
+    return (
+      <div className="flex flex-col md:flex-row items-center justify-around gap-6 py-2">
+        <div className="relative w-[180px] h-[180px] shrink-0">
+          <svg width={size} height={size} className="transform -rotate-90">
+            {/* Background Base Ring */}
+            <circle
+              cx={center}
+              cy={center}
+              r={radius}
+              stroke="currentColor"
+              strokeWidth={strokeWidth}
+              fill="none"
+              className="text-slate-100 dark:text-slate-800"
+            />
+
+            {/* Segment 1: Present Members (Green) */}
+            {presentRegStroke > 0 && (
+              <circle
+                cx={center}
+                cy={center}
+                r={radius}
+                stroke="#10B981"
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${presentRegStroke} ${circumference}`}
+                strokeDashoffset={-seg1Offset}
+                strokeLinecap="round"
+                fill="none"
+              />
+            )}
+
+            {/* Segment 2: Family Members (Blue) */}
+            {familyStroke > 0 && (
+              <circle
+                cx={center}
+                cy={center}
+                r={radius}
+                stroke="#2563EB"
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${familyStroke} ${circumference}`}
+                strokeDashoffset={-seg2Offset}
+                strokeLinecap="round"
+                fill="none"
+              />
+            )}
+
+            {/* Segment 3: Guests & Visitors (Purple) */}
+            {guestsStroke > 0 && (
+              <circle
+                cx={center}
+                cy={center}
+                r={radius}
+                stroke="#7C3AED"
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${guestsStroke} ${circumference}`}
+                strokeDashoffset={-seg3Offset}
+                strokeLinecap="round"
+                fill="none"
+              />
+            )}
+
+            {/* Segment 4: Absent Members (Red) */}
+            {absentStroke > 0 && (
+              <circle
+                cx={center}
+                cy={center}
+                r={radius}
+                stroke="#EF4444"
+                strokeWidth={strokeWidth}
+                strokeDasharray={`${absentStroke} ${circumference}`}
+                strokeDashoffset={-seg4Offset}
+                strokeLinecap="round"
+                fill="none"
+              />
+            )}
+          </svg>
+
+          {/* Center Callout */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span className="text-2xl font-black text-slate-900 dark:text-white">
+              {selectedEvent?.turnoutPercent || 0}%
+            </span>
+            <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              Turnout
+            </span>
+          </div>
+        </div>
+
+        {/* Legend Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-md">
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-emerald-50/80 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-800/40">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 shrink-0" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">Present Members</span>
+            </div>
+            <span className="text-sm font-black text-emerald-700 dark:text-emerald-400">{presentReg}</span>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-800/40">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3.5 h-3.5 rounded-full bg-blue-600 shrink-0" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">Household Family</span>
+            </div>
+            <span className="text-sm font-black text-blue-700 dark:text-blue-400">{family}</span>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-purple-50/80 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-800/40">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3.5 h-3.5 rounded-full bg-purple-600 shrink-0" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">Guests &amp; Visitors</span>
+            </div>
+            <span className="text-sm font-black text-purple-700 dark:text-purple-400">{guests}</span>
+          </div>
+
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-rose-50/80 dark:bg-rose-950/40 border border-rose-100 dark:border-rose-800/40">
+            <div className="flex items-center gap-2.5">
+              <span className="w-3.5 h-3.5 rounded-full bg-rose-500 shrink-0" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">Absent Members</span>
+            </div>
+            <span className="text-sm font-black text-rose-700 dark:text-rose-400">{absent}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -1000,10 +1180,11 @@ export default function AttendanceAdminPage() {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => openQRModal('church')}
-                className="px-4 py-2.5 rounded-xl bg-[#1A2D5A] hover:bg-[#152347] text-white text-xs font-bold shadow-md flex items-center gap-2 transition-all cursor-pointer"
+                className="px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-black text-white hover:bg-slate-800 border border-slate-700/60 flex flex-col items-center justify-center transition-all cursor-pointer shadow-xs min-w-[72px]"
+                title="Permanent Church QR Code"
               >
-                <QrCode size={16} />
-                <span>Church QR Check-in</span>
+                <QrCode size={18} />
+                <span className="text-[10px] font-bold mt-0.5">Church QR</span>
               </button>
             </div>
           </div>
@@ -1098,21 +1279,26 @@ export default function AttendanceAdminPage() {
 
                   {/* Filter & Search Bar */}
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    {/* Timeline Filter Pills (Matching Mobile: All, This Week, Upcoming, Past) */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
-                      {(['All', 'This Week', 'Upcoming', 'Past'] as TimelineFilter[]).map((tab) => {
-                        const isActive = timelineFilter === tab;
+                    {/* Timeline Filter Pills (Matching Mobile: All Events (11), This Week (0), Upcoming (0), Past (11)) */}
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
+                      {[
+                        { id: 'All', label: `All Events (${timelineCounts.all})` },
+                        { id: 'This Week', label: `This Week (${timelineCounts.thisWeek})` },
+                        { id: 'Upcoming', label: `Upcoming (${timelineCounts.upcoming})` },
+                        { id: 'Past', label: `Past (${timelineCounts.past})` },
+                      ].map((tab) => {
+                        const isActive = timelineFilter === tab.id;
                         return (
                           <button
-                            key={tab}
-                            onClick={() => setTimelineFilter(tab)}
-                            className={`px-3.5 py-1.5 rounded-full text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap ${
+                            key={tab.id}
+                            onClick={() => setTimelineFilter(tab.id as TimelineFilter)}
+                            className={`px-4 py-2 rounded-full text-xs font-extrabold transition-all cursor-pointer whitespace-nowrap ${
                               isActive
-                                ? 'bg-[#1A2D5A] text-white dark:bg-white dark:text-slate-900 shadow-xs'
-                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                                ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm'
+                                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
                             }`}
                           >
-                            {tab}
+                            {tab.label}
                           </button>
                         );
                       })}
@@ -1123,12 +1309,22 @@ export default function AttendanceAdminPage() {
                       <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
                       <input
                         type="text"
-                        placeholder="Search service title, date, location..."
+                        placeholder="Search events by title or date..."
                         value={searchEventQuery}
                         onChange={(e) => setSearchEventQuery(e.target.value)}
                         className="w-full pl-9 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-hidden focus:border-amber-500 font-medium"
                       />
                     </div>
+                  </div>
+
+                  {/* Section Heading Row: SELECT AN EVENT TO VIEW REPORT */}
+                  <div className="flex items-center justify-between text-xs px-1">
+                    <span className="font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[11px]">
+                      SELECT AN EVENT TO VIEW REPORT
+                    </span>
+                    <span className="text-slate-400 font-semibold text-[11px]">
+                      Showing {Math.min(visibleEvents.length, filteredEvents.length)} of {filteredEvents.length}
+                    </span>
                   </div>
 
                   {/* Events Grid */}
@@ -1158,27 +1354,37 @@ export default function AttendanceAdminPage() {
                             className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between group"
                           >
                             <div className="space-y-3">
-                              {/* Top Row: Status badge & Event QR trigger */}
-                              <div className="flex items-center justify-between">
-                                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${statusColors}`}>
-                                  {ev.status}
-                                </span>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => openQRModal('event', ev)}
-                                    title="View & Download Event QR Code"
-                                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
-                                  >
-                                    <QrCode size={16} />
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteEvent(ev)}
-                                    title="Delete Service Event"
-                                    className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
+                              {/* Top Row: Status badge, QR mode badge, Date, and Delete button */}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${statusColors}`}>
+                                    {ev.status}
+                                  </span>
+
+                                  {ev.requireEventQR ? (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 inline-flex items-center gap-1">
+                                      <QrCode size={11} className="text-purple-600 dark:text-purple-400" />
+                                      <span>Event QR Only</span>
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1">
+                                      <Building2 size={11} className="text-emerald-600 dark:text-emerald-400" />
+                                      <span>Church QR Allowed</span>
+                                    </span>
+                                  )}
+
+                                  <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                                    {ev.dateStr}
+                                  </span>
                                 </div>
+
+                                <button
+                                  onClick={() => handleDeleteEvent(ev)}
+                                  title="Delete Service Event"
+                                  className="w-8 h-8 rounded-xl bg-rose-100 hover:bg-rose-200 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
                               </div>
 
                               {/* Title & Date/Time */}
@@ -1188,63 +1394,50 @@ export default function AttendanceAdminPage() {
                                 </h3>
                                 <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
                                   <span className="flex items-center gap-1">
-                                    <Calendar size={13} className="text-amber-500" />
-                                    <span>{ev.dateStr}</span>
-                                  </span>
-                                  <span className="flex items-center gap-1">
                                     <Clock size={13} className="text-slate-400" />
                                     <span>{ev.timeStr}</span>
                                   </span>
+                                  {ev.location && (
+                                    <span className="flex items-center gap-1 text-[11px] text-slate-400">
+                                      <MapPin size={12} />
+                                      <span className="truncate">{ev.location}</span>
+                                    </span>
+                                  )}
                                 </div>
-                                {ev.location && (
-                                  <div className="flex items-center gap-1 text-[11px] text-slate-400 mt-1">
-                                    <MapPin size={12} />
-                                    <span className="truncate">{ev.location}</span>
-                                  </div>
-                                )}
                               </div>
 
-                              {/* Turnout Gauge / Progress */}
-                              <div className="bg-slate-50 dark:bg-slate-950/60 rounded-xl p-3 border border-slate-100 dark:border-slate-800 space-y-2">
-                                <div className="flex items-center justify-between text-xs font-bold">
-                                  <span className="text-slate-600 dark:text-slate-300">Turnout Rate</span>
-                                  <span className="text-[#1A2D5A] dark:text-blue-400 font-black">{ev.turnoutPercent}%</span>
-                                </div>
-                                <div className="w-full bg-slate-200 dark:bg-slate-800 h-2 rounded-full overflow-hidden">
-                                  <div
-                                    className="bg-emerald-500 h-full rounded-full transition-all duration-500"
-                                    style={{ width: `${ev.turnoutPercent}%` }}
-                                  />
-                                </div>
-                                <div className="grid grid-cols-4 gap-1 text-center pt-1 text-[10px]">
-                                  <div>
-                                    <span className="font-bold text-emerald-600 dark:text-emerald-400 block">{ev.presentCount}</span>
-                                    <span className="text-slate-400">Present</span>
-                                  </div>
-                                  <div>
-                                    <span className="font-bold text-slate-500 block">{ev.absentCount}</span>
-                                    <span className="text-slate-400">Absent</span>
-                                  </div>
-                                  <div>
-                                    <span className="font-bold text-blue-600 dark:text-blue-400 block">{ev.familyCount}</span>
-                                    <span className="text-slate-400">Families</span>
-                                  </div>
-                                  <div>
-                                    <span className="font-bold text-purple-600 dark:text-purple-400 block">{ev.guestCount}</span>
-                                    <span className="text-slate-400">Guests</span>
-                                  </div>
-                                </div>
+                              {/* Turnout Inline Metrics Matching Mobile Screenshot */}
+                              <div className="flex items-center gap-4 text-xs font-bold py-1">
+                                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                                  <UserCheck size={14} />
+                                  <span>{ev.presentCount} Present</span>
+                                </span>
+                                <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+                                  <TrendingUp size={14} />
+                                  <span>{ev.turnoutPercent}% Turnout</span>
+                                </span>
+                                <span className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400">
+                                  <UserX size={14} />
+                                  <span>{ev.absentCount} Absent</span>
+                                </span>
                               </div>
                             </div>
 
-                            {/* View Report Button */}
-                            <div className="pt-4 mt-3 border-t border-slate-100 dark:border-slate-800">
+                            {/* Bottom Action Row: Event QR & View Report & Charts */}
+                            <div className="grid grid-cols-2 gap-2 pt-3 mt-3 border-t border-slate-100 dark:border-slate-800">
+                              <button
+                                onClick={() => openQRModal('event', ev)}
+                                className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-[#1A2D5A] dark:text-blue-400 font-extrabold text-xs flex items-center justify-center gap-1.5 transition-all border border-slate-200 dark:border-slate-700 cursor-pointer shadow-xs"
+                              >
+                                <QrCode size={14} />
+                                <span>Event QR</span>
+                              </button>
                               <button
                                 onClick={() => handleSelectEvent(ev)}
-                                className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
+                                className="py-2.5 px-3 rounded-xl bg-[#1A2D5A] hover:bg-[#152347] dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-extrabold text-xs flex items-center justify-center gap-1 transition-all cursor-pointer shadow-xs"
                               >
-                                <span>View Attendee Register</span>
-                                <ChevronRight size={14} />
+                                <span>View Report &amp; Charts</span>
+                                <ChevronRight size={15} />
                               </button>
                             </div>
                           </div>
@@ -1303,67 +1496,145 @@ export default function AttendanceAdminPage() {
                     </div>
                   </div>
 
-                  {/* Event Summary Card with Big Stat Grid */}
+                  {/* Event Header & Summary Info */}
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-sm space-y-5">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
+                            {selectedEvent.status}
+                          </span>
+                          {selectedEvent.requireEventQR ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 inline-flex items-center gap-1">
+                              <QrCode size={11} className="text-purple-600 dark:text-purple-400" />
+                              <span>Event QR Only</span>
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 inline-flex items-center gap-1">
+                              <Building2 size={11} className="text-emerald-600 dark:text-emerald-400" />
+                              <span>Church QR Allowed</span>
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-400">•</span>
+                          <span className="text-xs text-slate-500">{selectedEvent.dateStr}</span>
+                          <span className="text-xs text-slate-400">•</span>
+                          <span className="text-xs text-slate-500">{selectedEvent.timeStr}</span>
+                        </div>
+                        <h2 className="text-xl font-black text-slate-900 dark:text-white mt-1">
+                          {selectedEvent.title}
+                        </h2>
+                        {selectedEvent.location && (
+                          <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                            <MapPin size={12} />
+                            <span>{selectedEvent.location}</span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* SECTION 1: 5 KEY STATISTIC CARDS (EXACT MOBILE PARITY) */}
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30">
-                          {selectedEvent.status}
-                        </span>
-                        <span className="text-xs text-slate-400">•</span>
-                        <span className="text-xs text-slate-500">{selectedEvent.dateStr}</span>
-                        <span className="text-xs text-slate-400">•</span>
-                        <span className="text-xs text-slate-500">{selectedEvent.timeStr}</span>
+                      <div className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                        EVENT ATTENDANCE BREAKDOWN
                       </div>
-                      <h2 className="text-xl font-black text-slate-900 dark:text-white mt-1">
-                        {selectedEvent.title}
-                      </h2>
-                      {selectedEvent.location && (
-                        <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                          <MapPin size={12} />
-                          <span>{selectedEvent.location}</span>
-                        </p>
-                      )}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                        {/* 1. Expected Members */}
+                        <div className="bg-slate-50/80 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-2xl p-4 shadow-xs">
+                          <div className="w-8 h-8 rounded-xl bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 mb-2">
+                            <Users size={17} />
+                          </div>
+                          <div className="text-2xl font-black text-slate-900 dark:text-white">
+                            {selectedEvent.totalExpected || 633}
+                          </div>
+                          <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wide">
+                            Expected
+                          </div>
+                          <div className="text-[10px] text-slate-400">Registered Roster</div>
+                        </div>
+
+                        {/* 2. Total Present */}
+                        <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800 rounded-2xl p-4 shadow-xs">
+                          <div className="w-8 h-8 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 flex items-center justify-center text-emerald-700 dark:text-emerald-400 mb-2">
+                            <UserCheck size={17} />
+                          </div>
+                          <div className="text-2xl font-black text-emerald-700 dark:text-emerald-400">
+                            {presentMembers.length}
+                          </div>
+                          <div className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wide">
+                            Present
+                          </div>
+                          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                            {selectedEvent.turnoutPercent}% Turnout
+                          </div>
+                        </div>
+
+                        {/* 3. Absent Members */}
+                        <div className="bg-rose-50/70 dark:bg-rose-950/30 border border-rose-300 dark:border-rose-800 rounded-2xl p-4 shadow-xs">
+                          <div className="w-8 h-8 rounded-xl bg-rose-100 dark:bg-rose-900/60 flex items-center justify-center text-rose-700 dark:text-rose-400 mb-2">
+                            <UserX size={17} />
+                          </div>
+                          <div className="text-2xl font-black text-rose-700 dark:text-rose-400">
+                            {absentMembers.length}
+                          </div>
+                          <div className="text-[11px] font-bold text-rose-800 dark:text-rose-300 uppercase tracking-wide">
+                            Absent
+                          </div>
+                          <div className="text-[10px] text-rose-600 dark:text-rose-400 font-semibold">
+                            Needs Follow-up
+                          </div>
+                        </div>
+
+                        {/* 4. Family Members */}
+                        <div className="bg-blue-50/70 dark:bg-blue-950/30 border border-blue-300 dark:border-blue-800 rounded-2xl p-4 shadow-xs">
+                          <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/60 flex items-center justify-center text-blue-700 dark:text-blue-400 mb-2">
+                            <Users size={17} />
+                          </div>
+                          <div className="text-2xl font-black text-blue-700 dark:text-blue-400">
+                            {selectedEvent.familyCount || 0}
+                          </div>
+                          <div className="text-[11px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wide">
+                            Family
+                          </div>
+                          <div className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                            Household Attendees
+                          </div>
+                        </div>
+
+                        {/* 5. Guests & Visitors */}
+                        <div className="bg-purple-50/70 dark:bg-purple-950/30 border border-purple-300 dark:border-purple-800 rounded-2xl p-4 shadow-xs">
+                          <div className="w-8 h-8 rounded-xl bg-purple-100 dark:bg-purple-900/60 flex items-center justify-center text-purple-700 dark:text-purple-400 mb-2">
+                            <UserPlus size={17} />
+                          </div>
+                          <div className="text-2xl font-black text-purple-700 dark:text-purple-400">
+                            {guestAttendees.length}
+                          </div>
+                          <div className="text-[11px] font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wide">
+                            Guests
+                          </div>
+                          <div className="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
+                            Visitors Brought
+                          </div>
+                        </div>
+                      </div>
                     </div>
+                  </div>
 
-                    {/* 4-Stat Mobile Parity Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
-                      <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-4">
-                        <div className="text-2xl font-black text-emerald-700 dark:text-emerald-400">
-                          {presentMembers.length}
-                        </div>
-                        <div className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wide mt-0.5">
-                          Present
-                        </div>
-                      </div>
-
-                      <div className="bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/40 rounded-2xl p-4">
-                        <div className="text-2xl font-black text-rose-700 dark:text-rose-400">
-                          {absentMembers.length}
-                        </div>
-                        <div className="text-[11px] font-bold text-rose-800 dark:text-rose-300 uppercase tracking-wide mt-0.5">
-                          Absent
-                        </div>
-                      </div>
-
-                      <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/40 rounded-2xl p-4">
-                        <div className="text-2xl font-black text-blue-700 dark:text-blue-400">
-                          {selectedEvent.turnoutPercent}%
-                        </div>
-                        <div className="text-[11px] font-bold text-blue-800 dark:text-blue-300 uppercase tracking-wide mt-0.5">
-                          Turnout Rate
-                        </div>
-                      </div>
-
-                      <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/40 rounded-2xl p-4">
-                        <div className="text-2xl font-black text-amber-700 dark:text-amber-400">
-                          {guestAttendees.length}
-                        </div>
-                        <div className="text-[11px] font-bold text-amber-800 dark:text-amber-300 uppercase tracking-wide mt-0.5">
-                          Guests &amp; Visitors
-                        </div>
-                      </div>
+                  {/* SECTION 2: ATTENDANCE DISTRIBUTION CHART (EXACT MOBILE DONUT) */}
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xs space-y-4">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100 dark:border-slate-800">
+                      <PieChart size={18} className="text-[#1A2D5A] dark:text-blue-400" />
+                      <h3 className="font-black text-sm text-slate-900 dark:text-white">
+                        Attendance Distribution Chart
+                      </h3>
                     </div>
+                    {renderDonutChart()}
+                  </div>
+
+                  {/* SECTION 3: MEMBER ROSTER & PASTORAL OUTREACH */}
+                  <div className="flex items-center justify-between px-1 pt-2">
+                    <span className="font-black text-slate-700 dark:text-slate-300 uppercase tracking-wider text-[11px]">
+                      MEMBER ROSTER &amp; PASTORAL OUTREACH
+                    </span>
                   </div>
 
                   {/* Filter Tabs & Search Bar for Register */}
