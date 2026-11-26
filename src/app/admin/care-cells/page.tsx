@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { AdminNavigationShell } from '@/components/layout/AdminNavigationShell';
 import { Button } from '@/components/ui/Button';
@@ -59,8 +59,15 @@ import {
   AlertTriangle,
   Flame,
   CheckSquare,
+  Square,
+  List,
+  Map as MapIcon,
+  Shield,
+  ExternalLink,
 } from 'lucide-react';
+import { ENGLISH_NAMES, TELUGU_NAMES, getChapterCount, getVerseCount } from '@/lib/bible-metadata';
 
+// ── Interfaces ─────────────────────────────────────────────────────────────────
 export interface CareCellRecord {
   id: string;
   name: string;
@@ -82,6 +89,8 @@ export interface CareCellRecord {
   maximumMembers: number;
   activeMemberCount: number;
   status: 'Active' | 'Inactive' | 'Archived';
+  latitude?: number;
+  longitude?: number;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -97,6 +106,8 @@ export interface CareCellMembershipRecord {
   memberPhoto?: string;
   locality?: string;
   address?: string;
+  latitude?: number;
+  longitude?: number;
   membershipStatus: 'Active' | 'Transferred' | 'Removed';
   joinedAt?: any;
   updatedAt?: any;
@@ -114,7 +125,11 @@ export interface CareCellMeetingRecord {
   endTime?: string;
   location: string;
   meetingType: string;
-  scripture?: string;
+  bibleBook?: string;
+  bibleChapter?: number;
+  bibleVerse?: string;
+  scriptureTextEn?: string;
+  scriptureTextTe?: string;
   status: 'Upcoming' | 'Completed' | 'Cancelled';
   createdAt?: any;
   updatedAt?: any;
@@ -180,8 +195,14 @@ interface ChurchMemberOption {
   name: string;
   phone: string;
   photoUrl?: string;
+  userType?: string;
   locality?: string;
   address?: string;
+  city?: string;
+  village?: string;
+  latitude?: number;
+  longitude?: number;
+  memberCode?: string;
 }
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -228,8 +249,9 @@ export default function CareCellsAdminPage() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Analytics Period Month & Year Picker State (Interactive Calendar Arrows & Picker)
-  const [selectedMonth, setSelectedMonth] = useState(11); // 1-12 (November)
-  const [selectedYear, setSelectedYear] = useState(2026);
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1); // 1-12
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [showMonthYearPicker, setShowMonthYearPicker] = useState(false);
 
   // Canonical Collections State
@@ -244,17 +266,479 @@ export default function CareCellsAdminPage() {
   const [membersPool, setMembersPool] = useState<ChurchMemberOption[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
 
-  // Leader / Assistant Picker Sub-Modals
-  const [leaderSearchQuery, setLeaderSearchQuery] = useState('');
-  const [showLeaderPicker, setShowLeaderPicker] = useState(false);
-  const [showAssistantPicker, setShowAssistantPicker] = useState(false);
+  // Active care cell for scoped views (e.g. Members, Locations)
+  const activeSelectedCell = useMemo(() => {
+    if (selectedCellFilter === 'ALL') {
+      return cells[0] || null;
+    }
+    return cells.find((c) => c.id === selectedCellFilter) || cells[0] || null;
+  }, [cells, selectedCellFilter]);
 
-  // Assigned Members for Create / Edit Form
-  const [selectedMembersMap, setSelectedMembersMap] = useState<Map<string, ChurchMemberOption>>(new Map());
-  const [showAllMembersPicker, setShowAllMembersPicker] = useState(false);
-  const [memberDirectorySearch, setMemberDirectorySearch] = useState('');
+  // Toast Helper
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 3500);
+  };
 
-  // Create / Edit Care Cell Modal State
+  // ── Month Picker Handlers ──────────────────────────────────────────────────
+  const handlePrevMonth = () => {
+    if (selectedMonth === 1) {
+      setSelectedMonth(12);
+      setSelectedYear((prev) => prev - 1);
+    } else {
+      setSelectedMonth((prev) => prev - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (selectedMonth === 12) {
+      setSelectedMonth(1);
+      setSelectedYear((prev) => prev + 1);
+    } else {
+      setSelectedMonth((prev) => prev + 1);
+    }
+  };
+
+  // ── 1. Firestore Listeners ───────────────────────────────────────────────────
+  useEffect(() => {
+    setLoading(true);
+
+    const unsubCells = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCells'), (snap) => {
+      const list: CareCellRecord[] = snap.docs.map((docSnap) => {
+        const d = docSnap.data();
+        return {
+          id: docSnap.id,
+          name: d.name || 'Unnamed Cell',
+          cellCode: d.cellCode || 'Rhema_CareCell-001',
+          description: d.description || '',
+          location: d.location || '',
+          meetingLocation: d.meetingLocation || d.location || '',
+          leaderId: d.leaderId || '',
+          leaderName: d.leaderName || 'Unassigned Leader',
+          leaderPhone: d.leaderPhone || '',
+          leaderPhoto: d.leaderPhoto,
+          assistantLeaderId: d.assistantLeaderId,
+          assistantLeaderName: d.assistantLeaderName,
+          assistantLeaderPhone: d.assistantLeaderPhone,
+          assistantLeaderPhoto: d.assistantLeaderPhoto,
+          meetingDay: d.meetingDay || 'Friday',
+          meetingTime: d.meetingTime || '19:00',
+          meetingEndTime: d.meetingEndTime || '20:30',
+          maximumMembers: d.maximumMembers || 20,
+          activeMemberCount: d.activeMemberCount || 0,
+          status: d.status || 'Active',
+          latitude: d.latitude || d.meetingLatitude,
+          longitude: d.longitude || d.meetingLongitude,
+          createdAt: d.createdAt,
+          updatedAt: d.updatedAt,
+        };
+      });
+      setCells(list);
+      setLoading(false);
+    });
+
+    const unsubMemberships = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellMemberships'), (snap) => {
+      const list: CareCellMembershipRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        cellId: d.data().cellId || '',
+        cellCode: d.data().cellCode || '',
+        cellName: d.data().cellName || '',
+        memberId: d.data().memberId || '',
+        memberName: d.data().memberName || 'Church Member',
+        memberPhone: d.data().memberPhone || '',
+        memberPhoto: d.data().memberPhoto || d.data().photoUrl,
+        locality: d.data().locality || d.data().area || '',
+        address: d.data().address || '',
+        latitude: d.data().latitude,
+        longitude: d.data().longitude,
+        membershipStatus: d.data().membershipStatus || 'Active',
+        joinedAt: d.data().joinedAt,
+        updatedAt: d.data().updatedAt,
+      }));
+      setMemberships(list);
+    });
+
+    const unsubMeetings = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellMeetings'), (snap) => {
+      const list: CareCellMeetingRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        cellId: d.data().cellId || '',
+        cellCode: d.data().cellCode || '',
+        cellName: d.data().cellName || '',
+        title: d.data().title || 'Fellowship Gathering',
+        description: d.data().description || '',
+        date: d.data().date || '',
+        startTime: d.data().startTime || '19:00',
+        endTime: d.data().endTime || '20:30',
+        location: d.data().location || '',
+        meetingType: d.data().meetingType || 'Bible Study',
+        bibleBook: d.data().bibleBook,
+        bibleChapter: d.data().bibleChapter,
+        bibleVerse: d.data().bibleVerse,
+        scriptureTextEn: d.data().scriptureTextEn,
+        scriptureTextTe: d.data().scriptureTextTe,
+        status: d.data().status || 'Upcoming',
+        createdAt: d.data().createdAt,
+        updatedAt: d.data().updatedAt,
+      }));
+      setMeetings(list);
+    });
+
+    const unsubVisits = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellVisits'), (snap) => {
+      const list: CareCellVisitRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        cellId: d.data().cellId || '',
+        cellName: d.data().cellName || '',
+        memberId: d.data().memberId || '',
+        memberName: d.data().memberName || 'Member',
+        memberPhone: d.data().memberPhone || '',
+        visitDate: d.data().visitDate || '',
+        visitTime: d.data().visitTime || '',
+        purpose: d.data().purpose || 'Routine Fellowship',
+        location: d.data().location || '',
+        assignedVisitors: d.data().assignedVisitors || 'Pastoral Care Team',
+        notes: d.data().notes || '',
+        status: d.data().status || 'Scheduled',
+        createdAt: d.data().createdAt,
+      }));
+      setVisits(list);
+    });
+
+    const unsubFollowups = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellFollowups'), (snap) => {
+      const list: CareCellFollowupRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        cellId: d.data().cellId || '',
+        cellName: d.data().cellName || '',
+        memberId: d.data().memberId || '',
+        memberName: d.data().memberName || 'Member',
+        memberPhone: d.data().memberPhone || '',
+        followupType: d.data().followupType || 'Phone Call',
+        reason: d.data().reason || 'Missed Gatherings',
+        notes: d.data().notes || '',
+        nextActionDate: d.data().nextActionDate || '',
+        status: d.data().status || 'Pending',
+        createdAt: d.data().createdAt,
+      }));
+      setFollowups(list);
+    });
+
+    const unsubNotices = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellAnnouncements'), (snap) => {
+      const list: CareCellNoticeRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        cellId: d.data().cellId || '',
+        cellName: d.data().cellName || '',
+        title: d.data().title || 'Notice',
+        message: d.data().message || '',
+        priority: d.data().priority || 'Normal',
+        createdAt: d.data().createdAt,
+      }));
+      setNotices(list);
+    });
+
+    const unsubPrayers = onSnapshot(collection(db, 'Rhema Church', 'rhema', 'careCellPrayerRequests'), (snap) => {
+      const list: CareCellPrayerRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        cellId: d.data().cellId || '',
+        cellName: d.data().cellName || '',
+        memberId: d.data().memberId || '',
+        memberName: d.data().memberName || 'Member',
+        category: d.data().category || 'General',
+        request: d.data().request || '',
+        pastoralNotes: d.data().pastoralNotes || '',
+        status: d.data().status || 'Active',
+        createdAt: d.data().createdAt,
+      }));
+      setPrayers(list);
+    });
+
+    return () => {
+      unsubCells();
+      unsubMemberships();
+      unsubMeetings();
+      unsubVisits();
+      unsubFollowups();
+      unsubNotices();
+      unsubPrayers();
+    };
+  }, []);
+
+  // ── 2. Load Church Member Directory for Lookup & Location Matching ─────────────
+  useEffect(() => {
+    const fetchChurchMembers = async () => {
+      setLoadingMembers(true);
+      try {
+        const memSnap = await getDocs(collection(db, 'Rhema Church', 'rhema', 'members'));
+        let parsed: ChurchMemberOption[] = [];
+
+        if (!memSnap.empty) {
+          parsed = memSnap.docs.map((d, index) => {
+            const data = d.data();
+            const fullName = data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Church Member';
+            return {
+              id: d.id,
+              name: fullName,
+              phone: data.phone || data.phoneNumber || data.referencePhone || '',
+              photoUrl: data.photoUrl || data.profilePicture || data.profilePhoto,
+              userType: data.userType || 'Member',
+              locality: data.locality || data.area || data.village || data.city || data.mailingCity || '',
+              address: data.address || data.street || data.mailingStreet || '',
+              city: data.city || data.mailingCity || '',
+              village: data.village || '',
+              latitude: typeof data.latitude === 'number' ? data.latitude : (data.lat ? Number(data.lat) : undefined),
+              longitude: typeof data.longitude === 'number' ? data.longitude : (data.lng ? Number(data.lng) : undefined),
+              memberCode: data.memberCode || `Rhema-${String(index + 1).padStart(3, '0')}`,
+            };
+          });
+        }
+
+        // Fallback demo members if directory is empty
+        if (parsed.length === 0) {
+          parsed = [
+            {
+              id: 'demo-1',
+              name: 'Rajesh Yeddula',
+              phone: '+919948510783',
+              locality: 'Koilakuntla',
+              address: 'RTC Busstand opposite Muthoot finance, Koilakuntla',
+              memberCode: 'Rhema-005',
+            },
+            {
+              id: 'demo-2',
+              name: 'Jayanthi Admin',
+              phone: '+919398501975',
+              locality: 'Koilakuntla',
+              address: 'Church of God Campus, Koilakuntla',
+              memberCode: 'Rhema-003',
+            },
+            {
+              id: 'demo-3',
+              name: 'Shafi Kumar',
+              phone: '+919642402639',
+              locality: 'Koilakuntla',
+              address: 'Main Bazaar, Koilakuntla',
+              memberCode: 'Rhema-006',
+            },
+            {
+              id: 'demo-4',
+              name: 'Sakibanda Sunil Babu',
+              phone: '+918374331432',
+              locality: 'Koilakuntla',
+              address: 'Koilakuntla',
+              memberCode: 'Rhema-002',
+            },
+            {
+              id: 'demo-5',
+              name: 'David Abraham',
+              phone: '+919876543210',
+              locality: 'Hebbal',
+              address: 'Hebbal Ring Road',
+              memberCode: 'Rhema-007',
+            },
+            {
+              id: 'demo-6',
+              name: 'Mary Grace',
+              phone: '+919876543211',
+              locality: 'Indiranagar',
+              address: '100ft Road, Indiranagar',
+              memberCode: 'Rhema-008',
+            },
+          ];
+        }
+
+        setMembersPool(parsed);
+      } catch (err) {
+        console.error('Error fetching church members:', err);
+      } finally {
+        setLoadingMembers(false);
+      }
+    };
+
+    fetchChurchMembers();
+  }, []);
+
+  // Compute unique localities for the filter pills
+  const uniqueLocalities = useMemo(() => {
+    const set = new Set<string>();
+    membersPool.forEach((m) => {
+      if (m.locality && m.locality.trim()) {
+        set.add(m.locality.trim());
+      }
+    });
+    return Array.from(set).sort();
+  }, [membersPool]);
+
+  // Map of active memberships for deduplication across all cells
+  const activeMembershipsMap = useMemo(() => {
+    const map = new Map<string, CareCellMembershipRecord>();
+    memberships.filter((m) => m.membershipStatus === 'Active').forEach((m) => {
+      map.set(m.memberId, m);
+    });
+    return map;
+  }, [memberships]);
+
+  // ── 3. Dedicated Add Members Modal (100% Mobile Parity MemberLookupModal) ──────
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
+  const [addMembersTargetCell, setAddMembersTargetCell] = useState<CareCellRecord | null>(null);
+  const [addMembersSearchQuery, setAddMembersSearchQuery] = useState('');
+  const [addMembersSelectedLocality, setAddMembersSelectedLocality] = useState<string>('ALL');
+  const [addMembersFilterByLocation, setAddMembersFilterByLocation] = useState<boolean>(true);
+  const [addMembersSelectedMap, setAddMembersSelectedMap] = useState<Map<string, ChurchMemberOption>>(new Map());
+  const [addMembersTransferIds, setAddMembersTransferIds] = useState<Set<string>>(new Set());
+  const [addMembersSaving, setAddMembersSaving] = useState(false);
+
+  const openAddMembersModalForCell = (cell: CareCellRecord) => {
+    setAddMembersTargetCell(cell);
+    setAddMembersSearchQuery('');
+    setAddMembersSelectedLocality('ALL');
+    setAddMembersFilterByLocation(!!(cell.location && cell.location.trim()));
+    setAddMembersSelectedMap(new Map());
+    setAddMembersTransferIds(new Set());
+    setShowAddMembersModal(true);
+  };
+
+  // Filtered members for Add Members modal
+  const addMembersFilteredList = useMemo(() => {
+    let result = membersPool;
+    const targetLoc = (addMembersTargetCell?.location || '').trim().toLowerCase();
+
+    // Location toggle filter
+    if (addMembersFilterByLocation && targetLoc) {
+      result = result.filter((m) => {
+        const mLoc = (m.locality || m.city || m.village || m.address || '').toLowerCase();
+        return mLoc.includes(targetLoc);
+      });
+    } else if (addMembersSelectedLocality !== 'ALL') {
+      result = result.filter(
+        (m) => (m.locality || '').trim().toLowerCase() === addMembersSelectedLocality.toLowerCase()
+      );
+    }
+
+    // Search query filter
+    if (addMembersSearchQuery.trim()) {
+      const q = addMembersSearchQuery.toLowerCase().trim();
+      const rawDigits = q.replace(/\D/g, '');
+      result = result.filter((m) => {
+        const matchName = m.name.toLowerCase().includes(q);
+        const matchPhone = rawDigits && m.phone ? m.phone.replace(/\D/g, '').includes(rawDigits) : false;
+        const matchLoc = m.locality ? m.locality.toLowerCase().includes(q) : false;
+        const matchAddr = m.address ? m.address.toLowerCase().includes(q) : false;
+        const matchCode = m.memberCode ? m.memberCode.toLowerCase().includes(q) : false;
+        return matchName || matchPhone || matchLoc || matchAddr || matchCode;
+      });
+    }
+
+    return result;
+  }, [
+    membersPool,
+    addMembersTargetCell,
+    addMembersFilterByLocation,
+    addMembersSelectedLocality,
+    addMembersSearchQuery,
+  ]);
+
+  const handleToggleAddMember = (m: ChurchMemberOption) => {
+    if (!addMembersTargetCell) return;
+
+    // Check if already in THIS cell
+    const existingMembership = activeMembershipsMap.get(m.id);
+    if (existingMembership && existingMembership.cellId === addMembersTargetCell.id) {
+      alert(`${m.name} is already an active member of this Care Cell.`);
+      return;
+    }
+
+    // Check if in ANOTHER cell (transfer prompt)
+    if (existingMembership && existingMembership.cellId !== addMembersTargetCell.id) {
+      const otherLabel = existingMembership.cellCode || existingMembership.cellName || 'another cell';
+      const confirmed = window.confirm(
+        `Member Transfer Required:\n\n${m.name} is currently enrolled in ${otherLabel}.\n\nAdding them to ${addMembersTargetCell.name} will transfer them from ${otherLabel}. Previous records remain preserved.\n\nDo you want to proceed with transfer?`
+      );
+      if (!confirmed) return;
+
+      setAddMembersSelectedMap((prev) => {
+        const next = new Map(prev);
+        next.set(m.id, m);
+        return next;
+      });
+      setAddMembersTransferIds((prev) => new Set(prev).add(m.id));
+      return;
+    }
+
+    // Normal toggle
+    setAddMembersSelectedMap((prev) => {
+      const next = new Map(prev);
+      if (next.has(m.id)) {
+        next.delete(m.id);
+        setAddMembersTransferIds((tPrev) => {
+          const tNext = new Set(tPrev);
+          tNext.delete(m.id);
+          return tNext;
+        });
+      } else {
+        next.set(m.id, m);
+      }
+      return next;
+    });
+  };
+
+  const handleConfirmAddMembers = async () => {
+    if (!addMembersTargetCell || addMembersSelectedMap.size === 0) return;
+    setAddMembersSaving(true);
+    try {
+      const batch = writeBatch(db);
+      const selectedList = Array.from(addMembersSelectedMap.values());
+
+      for (const m of selectedList) {
+        // If member had an existing membership in another cell, mark it as Transferred
+        const existing = activeMembershipsMap.get(m.id);
+        if (existing) {
+          const oldRef = doc(db, 'Rhema Church', 'rhema', 'careCellMemberships', existing.id);
+          batch.update(oldRef, {
+            membershipStatus: 'Transferred',
+            transferredToCellId: addMembersTargetCell.id,
+            transferredToCellName: addMembersTargetCell.name,
+            updatedAt: serverTimestamp(),
+          });
+        }
+
+        // Create new membership in target cell
+        const newRef = doc(collection(db, 'Rhema Church', 'rhema', 'careCellMemberships'));
+        batch.set(newRef, {
+          cellId: addMembersTargetCell.id,
+          cellCode: addMembersTargetCell.cellCode,
+          cellName: addMembersTargetCell.name,
+          memberId: m.id,
+          memberName: m.name,
+          memberPhone: m.phone || '',
+          memberPhoto: m.photoUrl || '',
+          locality: m.locality || '',
+          address: m.address || '',
+          latitude: m.latitude || null,
+          longitude: m.longitude || null,
+          membershipStatus: 'Active',
+          joinedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      // Update target cell activeMemberCount
+      const cellRef = doc(db, 'Rhema Church', 'rhema', 'careCells', addMembersTargetCell.id);
+      const newCount = (addMembersTargetCell.activeMemberCount || 0) + selectedList.length;
+      batch.update(cellRef, {
+        activeMemberCount: newCount,
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+      showToast(`Successfully assigned ${selectedList.length} member(s) to ${addMembersTargetCell.name}!`);
+      setShowAddMembersModal(false);
+    } catch (err: any) {
+      console.error('Error assigning members:', err);
+      alert('Failed to assign members: ' + (err.message || 'Unknown error'));
+    } finally {
+      setAddMembersSaving(false);
+    }
+  };
+
+  // ── 4. Create / Edit Care Cell Form State & Handlers ──────────────────────────
   const [modalOpen, setModalOpen] = useState(false);
   const [editingCell, setEditingCell] = useState<CareCellRecord | null>(null);
   const [formName, setFormName] = useState('');
@@ -275,441 +759,20 @@ export default function CareCellsAdminPage() {
   const [formMeetingEndTime, setFormMeetingEndTime] = useState('20:30');
   const [formMaxMembers, setFormMaxMembers] = useState('20');
   const [formStatus, setFormStatus] = useState<'Active' | 'Inactive' | 'Archived'>('Active');
-  const [saving, setSaving] = useState(false);
+  const [formSelectedMembersMap, setFormSelectedMembersMap] = useState<Map<string, ChurchMemberOption>>(new Map());
+  const [savingCell, setSavingCell] = useState(false);
 
-  // Schedule Meeting Modal State
-  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
-  const [editingMeeting, setEditingMeeting] = useState<CareCellMeetingRecord | null>(null);
-  const [meetingCellId, setMeetingCellId] = useState('');
-  const [meetingTitle, setMeetingTitle] = useState('');
-  const [meetingDescription, setMeetingDescription] = useState('');
-  const [meetingDate, setMeetingDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [meetingStartTime, setMeetingStartTime] = useState('19:00');
-  const [meetingEndTime, setMeetingEndTime] = useState('20:30');
-  const [meetingLocation, setMeetingLocation] = useState('');
-  const [meetingType, setMeetingType] = useState('Bible Study');
-  const [meetingScripture, setMeetingScripture] = useState('Philippians 4:6-7');
-  const [savingMeeting, setSavingMeeting] = useState(false);
+  // Single-select Member Lookup Modal (for Leader or Assistant)
+  const [singleLookupMode, setSingleLookupMode] = useState<'leader' | 'assistant' | null>(null);
+  const [singleLookupSearch, setSingleLookupSearch] = useState('');
 
-  // Transfer Member Modal State
-  const [transferModalOpen, setTransferModalOpen] = useState(false);
-  const [memberToTransfer, setMemberToTransfer] = useState<CareCellMembershipRecord | null>(null);
-  const [transferTargetCellId, setTransferTargetCellId] = useState('');
-  const [transferring, setTransferring] = useState(false);
-
-  // Attendance Tab State
-  const [attendanceCellId, setAttendanceCellId] = useState('');
-  const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [attendanceRoster, setAttendanceRoster] = useState<Record<string, 'Present' | 'Absent' | 'Late'>>({});
-  const [savingAttendance, setSavingAttendance] = useState(false);
-
-  // Visits Tab State
-  const [visitModalOpen, setVisitModalOpen] = useState(false);
-  const [visitCellId, setVisitCellId] = useState('');
-  const [visitMemberId, setVisitMemberId] = useState('');
-  const [visitMemberName, setVisitMemberName] = useState('');
-  const [visitMemberPhone, setVisitMemberPhone] = useState('');
-  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [visitTime, setVisitTime] = useState('18:00');
-  const [visitPurpose, setVisitPurpose] = useState('Family Blessing');
-  const [visitLocation, setVisitLocation] = useState('');
-  const [visitAssignedVisitors, setVisitAssignedVisitors] = useState('Pastor & Care Cell Leader');
-  const [visitNotes, setVisitNotes] = useState('');
-  const [savingVisit, setSavingVisit] = useState(false);
-  const [visitStatusFilter, setVisitStatusFilter] = useState<'ALL' | 'Scheduled' | 'Completed' | 'Cancelled'>('ALL');
-
-  // Follow-ups Tab State
-  const [followupModalOpen, setFollowupModalOpen] = useState(false);
-  const [followupCellId, setFollowupCellId] = useState('');
-  const [followupMemberId, setFollowupMemberId] = useState('');
-  const [followupMemberName, setFollowupMemberName] = useState('');
-  const [followupMemberPhone, setFollowupMemberPhone] = useState('');
-  const [followupType, setFollowupType] = useState('Phone Call');
-  const [followupReason, setFollowupReason] = useState('Missed 2+ Meetings');
-  const [followupNotes, setFollowupNotes] = useState('');
-  const [followupNextActionDate, setFollowupNextActionDate] = useState('');
-  const [followupStatus, setFollowupStatus] = useState<'Pending' | 'Completed' | 'Needs Further Follow-up'>('Pending');
-  const [savingFollowup, setSavingFollowup] = useState(false);
-  const [followupFilter, setFollowupFilter] = useState<string>('ALL');
-
-  // Notices & Prayer Tab State
-  const [noticeSection, setNoticeSection] = useState<'prayers' | 'notices'>('prayers');
-  const [noticeModalOpen, setNoticeModalOpen] = useState(false);
-  const [noticeCellId, setNoticeCellId] = useState('ALL');
-  const [noticeTitle, setNoticeTitle] = useState('');
-  const [noticeMessage, setNoticeMessage] = useState('');
-  const [noticePriority, setNoticePriority] = useState<'Normal' | 'High' | 'Urgent'>('Normal');
-  const [savingNotice, setSavingNotice] = useState(false);
-
-  const [prayerModalOpen, setPrayerModalOpen] = useState(false);
-  const [prayerCellId, setPrayerCellId] = useState('');
-  const [prayerMemberId, setPrayerMemberId] = useState('');
-  const [prayerMemberName, setPrayerMemberName] = useState('');
-  const [prayerCategory, setPrayerCategory] = useState('Healing & Health');
-  const [prayerRequest, setPrayerRequest] = useState('');
-  const [savingPrayer, setSavingPrayer] = useState(false);
-
-  // ── Real-Time Firestore Listeners ──
-  useEffect(() => {
-    // 1. Care Cells
-    const cellsRef = collection(db, 'Rhema Church', 'rhema', 'careCells');
-    const unsubCells = onSnapshot(cellsRef, (snap) => {
-      const list: CareCellRecord[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          name: data.name || 'Care Cell',
-          cellCode: data.cellCode || `Rhema_CareCell-${d.id.slice(0, 4)}`,
-          description: data.description || '',
-          location: data.location || data.zone || 'Central',
-          meetingLocation: data.meetingLocation || data.hostAddress || data.location || '',
-          leaderId: data.leaderId || '',
-          leaderName: data.leaderName || 'Unassigned Leader',
-          leaderPhone: data.leaderPhone || '',
-          leaderPhoto: data.leaderPhoto || '',
-          assistantLeaderId: data.assistantLeaderId || '',
-          assistantLeaderName: data.assistantLeaderName || '',
-          assistantLeaderPhone: data.assistantLeaderPhone || '',
-          assistantLeaderPhoto: data.assistantLeaderPhoto || '',
-          meetingDay: data.meetingDay || 'Friday',
-          meetingTime: data.meetingTime || '19:00',
-          meetingEndTime: data.meetingEndTime || '20:30',
-          maximumMembers: Number(data.maximumMembers || data.capacityMax) || 20,
-          activeMemberCount: Number(data.activeMemberCount) || 0,
-          status: data.status === 'Inactive' ? 'Inactive' : data.status === 'Archived' ? 'Archived' : 'Active',
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
-        };
-      });
-      setCells(list);
-      if (list.length > 0 && !attendanceCellId) {
-        setAttendanceCellId(list[0].id);
-      }
-      setLoading(false);
-    });
-
-    // 2. Memberships
-    const memsRef = collection(db, 'Rhema Church', 'rhema', 'careCellMemberships');
-    const unsubMems = onSnapshot(memsRef, (snap) => {
-      const list: CareCellMembershipRecord[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          cellId: data.cellId || '',
-          cellCode: data.cellCode || '',
-          cellName: data.cellName || '',
-          memberId: data.memberId || d.id,
-          memberName: data.memberName || 'Member',
-          memberPhone: data.memberPhone || '',
-          memberPhoto: data.memberPhoto || '',
-          locality: data.locality || '',
-          address: data.address || '',
-          membershipStatus: data.membershipStatus || 'Active',
-          joinedAt: data.joinedAt,
-          updatedAt: data.updatedAt,
-        };
-      });
-      setMemberships(list);
-    });
-
-    // 3. Meetings
-    const meetsRef = collection(db, 'Rhema Church', 'rhema', 'careCellMeetings');
-    const unsubMeets = onSnapshot(meetsRef, (snap) => {
-      const list: CareCellMeetingRecord[] = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          cellId: data.cellId || '',
-          cellCode: data.cellCode || '',
-          cellName: data.cellName || '',
-          title: data.title || 'Fellowship Meeting',
-          description: data.description || '',
-          date: data.date || '',
-          startTime: data.startTime || '19:00',
-          endTime: data.endTime || '20:30',
-          location: data.location || '',
-          meetingType: data.meetingType || 'Bible Study',
-          scripture: data.scripture || '',
-          status: data.status || 'Upcoming',
-          createdAt: data.createdAt,
-          updatedAt: data.updatedAt,
-        };
-      });
-      setMeetings(list);
-    });
-
-    // 4. Visits
-    const visitsRef = collection(db, 'Rhema Church', 'rhema', 'careCellVisits');
-    const unsubVisits = onSnapshot(visitsRef, (snap) => {
-      const list: CareCellVisitRecord[] = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as CareCellVisitRecord[];
-      setVisits(list);
-    });
-
-    // 5. Follow-ups
-    const followupsRef = collection(db, 'Rhema Church', 'rhema', 'careCellFollowups');
-    const unsubFollowups = onSnapshot(followupsRef, (snap) => {
-      const list: CareCellFollowupRecord[] = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as CareCellFollowupRecord[];
-      setFollowups(list);
-    });
-
-    // 6. Notices
-    const noticesRef = collection(db, 'Rhema Church', 'rhema', 'careCellAnnouncements');
-    const unsubNotices = onSnapshot(noticesRef, (snap) => {
-      const list: CareCellNoticeRecord[] = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as CareCellNoticeRecord[];
-      setNotices(list);
-    });
-
-    // 7. Prayers
-    const prayersRef = collection(db, 'Rhema Church', 'rhema', 'careCellPrayerRequests');
-    const unsubPrayers = onSnapshot(prayersRef, (snap) => {
-      const list: CareCellPrayerRecord[] = snap.docs.map((d) => ({
-        id: d.id,
-        ...d.data(),
-      })) as CareCellPrayerRecord[];
-      setPrayers(list);
-    });
-
-    return () => {
-      unsubCells();
-      unsubMems();
-      unsubMeets();
-      unsubVisits();
-      unsubFollowups();
-      unsubNotices();
-      unsubPrayers();
-    };
-  }, [attendanceCellId]);
-
-  // Fetch Church Members Pool
-  useEffect(() => {
-    const fetchMembers = async () => {
-      setLoadingMembers(true);
-      try {
-        const memCol = collection(db, 'Rhema Church', 'rhema', 'members');
-        const snap = await getDocs(memCol);
-        const mapped: ChurchMemberOption[] = snap.docs.map((docSnap) => {
-          const m = docSnap.data();
-          const name = m.name || `${m.firstName || ''} ${m.lastName || ''}`.trim() || 'Church Member';
-          const phone = m.phone || m.phoneNumber || m.mobileNumber || '';
-          const photoUrl = m.profilePhoto || m.photoURL || m.avatar || '';
-          const locality = m.locality || m.city || m.area || '';
-          const address = m.address || m.street || m.locality || '';
-          return { id: docSnap.id, name, phone, photoUrl, locality, address };
-        });
-        setMembersPool(mapped);
-      } catch (err) {
-        console.error('[CareCellsAdminPage] Error loading members:', err);
-      } finally {
-        setLoadingMembers(false);
-      }
-    };
-    fetchMembers();
-  }, []);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4000);
-  };
-
-  // ── Month Navigation Helpers ──
-  const handlePrevMonth = () => {
-    if (selectedMonth === 1) {
-      setSelectedMonth(12);
-      setSelectedYear((y) => y - 1);
-    } else {
-      setSelectedMonth((m) => m - 1);
-    }
-  };
-
-  const handleNextMonth = () => {
-    if (selectedMonth === 12) {
-      setSelectedMonth(1);
-      setSelectedYear((y) => y + 1);
-    } else {
-      setSelectedMonth((m) => m + 1);
-    }
-  };
-
-  // Status counts (matching mobile statusCounts)
-  const statusCounts = useMemo(() => {
-    return {
-      All: cells.length,
-      Active: cells.filter((c) => c.status === 'Active').length,
-      Inactive: cells.filter((c) => c.status === 'Inactive').length,
-      Archived: cells.filter((c) => c.status === 'Archived').length,
-    };
-  }, [cells]);
-
-  // Unique leaders count
-  const totalLeadersCount = useMemo(() => {
-    const leaderNames = new Set(cells.map((c) => c.leaderName).filter(Boolean));
-    return leaderNames.size;
-  }, [cells]);
-
-  // Total enrolled members across active cells
-  const totalEnrolledCount = useMemo(() => {
-    const activeMembers = memberships.filter((m) => m.membershipStatus === 'Active');
-    return activeMembers.length > 0 ? activeMembers.length : 2;
-  }, [memberships]);
-
-  // Meetings matching selected month and year
-  const meetingsThisMonth = useMemo(() => {
-    return meetings.filter((m) => {
-      if (!m.date) return false;
-      const parts = m.date.split('-');
-      if (parts.length < 2) return false;
-      const y = parseInt(parts[0], 10);
-      const mon = parseInt(parts[1], 10);
-      return y === selectedYear && mon === selectedMonth;
-    });
-  }, [meetings, selectedMonth, selectedYear]);
-
-  // Location-based member matching for Create / Edit Form
-  const locationMatchedMembers = useMemo(() => {
-    if (!formLocation || formLocation.trim().length < 2) return [];
-    const loc = formLocation.toLowerCase().trim();
-    return membersPool.filter((m) => {
-      if (m.id === formLeaderId || m.id === formAssistantId) return false;
-      const memLoc = (m.locality || '').toLowerCase();
-      const memAddr = (m.address || '').toLowerCase();
-      return memLoc.includes(loc) || memAddr.includes(loc);
-    });
-  }, [membersPool, formLocation, formLeaderId, formAssistantId]);
-
-  const isAllMatchedSelected = useMemo(() => {
-    if (locationMatchedMembers.length === 0) return false;
-    return locationMatchedMembers.every((m) => selectedMembersMap.has(m.id));
-  }, [locationMatchedMembers, selectedMembersMap]);
-
-  const toggleAllMatchedMembers = () => {
-    setSelectedMembersMap((prev) => {
-      const next = new Map(prev);
-      if (isAllMatchedSelected) {
-        locationMatchedMembers.forEach((m) => next.delete(m.id));
-      } else {
-        locationMatchedMembers.forEach((m) => next.set(m.id, m));
-      }
-      return next;
-    });
-  };
-
-  const toggleMemberSelection = (mem: ChurchMemberOption) => {
-    setSelectedMembersMap((prev) => {
-      const next = new Map(prev);
-      if (next.has(mem.id)) {
-        next.delete(mem.id);
-      } else {
-        next.set(mem.id, mem);
-      }
-      return next;
-    });
-  };
-
-  const removeSelectedMember = (memberId: string) => {
-    setSelectedMembersMap((prev) => {
-      const next = new Map(prev);
-      next.delete(memberId);
-      return next;
-    });
-  };
-
-  // Filtered Care Cells for Manage Tab
-  const filteredCells = useMemo(() => {
-    return cells.filter((c) => {
-      if (selectedCellFilter !== 'ALL' && c.cellCode !== selectedCellFilter && c.id !== selectedCellFilter) {
-        return false;
-      }
-      if (statusFilter !== 'All' && c.status !== statusFilter) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        return (
-          (c.cellCode || '').toLowerCase().includes(q) ||
-          (c.name || '').toLowerCase().includes(q) ||
-          (c.leaderName || '').toLowerCase().includes(q) ||
-          (c.location || '').toLowerCase().includes(q) ||
-          (c.meetingLocation || '').toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [cells, selectedCellFilter, statusFilter, searchQuery]);
-
-  // Filtered Members for Members Directory Tab
-  const filteredDirectoryMembers = useMemo(() => {
-    return memberships.filter((m) => {
-      if (selectedCellFilter !== 'ALL' && m.cellCode !== selectedCellFilter && m.cellId !== selectedCellFilter) {
-        return false;
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        return (
-          m.memberName.toLowerCase().includes(q) ||
-          (m.memberPhone || '').includes(q) ||
-          (m.locality || '').toLowerCase().includes(q) ||
-          (m.address || '').toLowerCase().includes(q)
-        );
-      }
-      return true;
-    });
-  }, [memberships, selectedCellFilter, searchQuery]);
-
-  // Filtered Meetings for Meetings Tab
-  const filteredMeetings = useMemo(() => {
-    return meetings.filter((m) => {
-      if (selectedCellFilter !== 'ALL' && m.cellCode !== selectedCellFilter && m.cellId !== selectedCellFilter) {
-        return false;
-      }
-      if (m.date) {
-        const parts = m.date.split('-');
-        if (parts.length >= 2) {
-          const y = parseInt(parts[0], 10);
-          const mon = parseInt(parts[1], 10);
-          if (y !== selectedYear || mon !== selectedMonth) return false;
-        }
-      }
-      return true;
-    });
-  }, [meetings, selectedCellFilter, selectedMonth, selectedYear]);
-
-  // Filtered Visits for Visits Tab
-  const filteredVisits = useMemo(() => {
-    return visits.filter((v) => {
-      if (selectedCellFilter !== 'ALL' && v.cellId !== selectedCellFilter) return false;
-      if (visitStatusFilter !== 'ALL' && v.status !== visitStatusFilter) return false;
-      return true;
-    });
-  }, [visits, selectedCellFilter, visitStatusFilter]);
-
-  // Filtered Followups
-  const filteredFollowups = useMemo(() => {
-    return followups.filter((f) => {
-      if (selectedCellFilter !== 'ALL' && f.cellId !== selectedCellFilter) return false;
-      if (followupFilter !== 'ALL' && f.status !== followupFilter) return false;
-      return true;
-    });
-  }, [followups, selectedCellFilter, followupFilter]);
-
-  const generateAutoCellCode = () => {
-    const num = cells.length + 1;
-    return `Rhema_CareCell-${String(num).padStart(3, '0')}`;
-  };
-
-  // ── Open Modals ──
   const openCreateModal = () => {
     setEditingCell(null);
     setFormName('');
-    setFormCellCode(generateAutoCellCode());
+    const nextNum = cells.length + 1;
+    setFormCellCode(`Rhema_CareCell-${String(nextNum).padStart(3, '0')}`);
     setFormDescription('');
-    setFormLocation('');
+    setFormLocation('Koilakuntla');
     setFormMeetingLocation('');
     setFormLeaderId('');
     setFormLeaderName('');
@@ -724,354 +787,549 @@ export default function CareCellsAdminPage() {
     setFormMeetingEndTime('20:30');
     setFormMaxMembers('20');
     setFormStatus('Active');
-    setSelectedMembersMap(new Map());
+    setFormSelectedMembersMap(new Map());
     setModalOpen(true);
   };
 
-  const openEditModal = async (cell: CareCellRecord) => {
+  const openEditModal = (cell: CareCellRecord) => {
     setEditingCell(cell);
     setFormName(cell.name);
     setFormCellCode(cell.cellCode);
     setFormDescription(cell.description || '');
-    setFormLocation(cell.location);
-    setFormMeetingLocation(cell.meetingLocation);
+    setFormLocation(cell.location || '');
+    setFormMeetingLocation(cell.meetingLocation || cell.location || '');
     setFormLeaderId(cell.leaderId || '');
-    setFormLeaderName(cell.leaderName);
-    setFormLeaderPhone(cell.leaderPhone);
+    setFormLeaderName(cell.leaderName || '');
+    setFormLeaderPhone(cell.leaderPhone || '');
     setFormLeaderPhoto(cell.leaderPhoto);
     setFormAssistantId(cell.assistantLeaderId);
     setFormAssistantName(cell.assistantLeaderName || '');
     setFormAssistantPhone(cell.assistantLeaderPhone || '');
     setFormAssistantPhoto(cell.assistantLeaderPhoto);
-    setFormMeetingDay(cell.meetingDay);
-    setFormMeetingTime(cell.meetingTime);
+    setFormMeetingDay(cell.meetingDay || 'Friday');
+    setFormMeetingTime(cell.meetingTime || '19:00');
     setFormMeetingEndTime(cell.meetingEndTime || '20:30');
-    setFormMaxMembers(String(cell.maximumMembers));
-    setFormStatus(cell.status);
-
-    // Fetch existing active memberships for this cell from Firestore
-    try {
-      const q = query(
-        collection(db, 'Rhema Church', 'rhema', 'careCellMemberships'),
-        where('cellId', '==', cell.id),
-        where('membershipStatus', '==', 'Active')
-      );
-      const snap = await getDocs(q);
-      const newMap = new Map<string, ChurchMemberOption>();
-      snap.docs.forEach((d) => {
-        const data = d.data();
-        const memId = data.memberId || d.id;
-        newMap.set(memId, {
-          id: memId,
-          name: data.memberName || 'Member',
-          phone: data.memberPhone || '',
-          locality: data.locality || '',
-          photoUrl: data.memberPhoto || '',
-        });
-      });
-      setSelectedMembersMap(newMap);
-    } catch (err) {
-      console.warn('Error loading cell memberships:', err);
-      setSelectedMembersMap(new Map());
-    }
-
+    setFormMaxMembers(String(cell.maximumMembers || 20));
+    setFormStatus(cell.status || 'Active');
+    setFormSelectedMembersMap(new Map());
     setModalOpen(true);
   };
 
-  const handleSelectLeader = (m: ChurchMemberOption) => {
-    setFormLeaderId(m.id);
-    setFormLeaderName(m.name);
-    setFormLeaderPhone(m.phone);
-    setFormLeaderPhoto(m.photoUrl);
-    setShowLeaderPicker(false);
-  };
+  // Location matched members in Create Cell form
+  const formLocationMatchedMembers = useMemo(() => {
+    if (!formLocation || !formLocation.trim() || formLocation.trim().length < 2) {
+      return [];
+    }
+    const loc = formLocation.trim().toLowerCase();
+    return membersPool.filter((m) => {
+      if (m.id === formLeaderId || m.id === formAssistantId) return false;
+      const mLoc = (m.locality || m.city || m.village || m.address || '').toLowerCase();
+      return mLoc.includes(loc);
+    });
+  }, [membersPool, formLocation, formLeaderId, formAssistantId]);
 
-  const handleSelectAssistant = (m: ChurchMemberOption) => {
-    setFormAssistantId(m.id);
-    setFormAssistantName(m.name);
-    setFormAssistantPhone(m.phone);
-    setFormAssistantPhoto(m.photoUrl);
-    setShowAssistantPicker(false);
-  };
+  // When location changes, auto-select matched members if not already selected
+  useEffect(() => {
+    if (formLocationMatchedMembers.length > 0 && formSelectedMembersMap.size === 0) {
+      const map = new Map<string, ChurchMemberOption>();
+      formLocationMatchedMembers.forEach((m) => map.set(m.id, m));
+      setFormSelectedMembersMap(map);
+    }
+  }, [formLocationMatchedMembers]);
 
-  // ── Save Care Cell ──
   const handleSaveCell = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formLeaderName.trim()) {
-      showToast('Please enter both Care Cell Name and Leader Name.');
+    if (!formName.trim() || !formCellCode.trim()) {
+      alert('Please fill out Care Cell Name and Code.');
+      return;
+    }
+    if (!formLeaderName.trim()) {
+      alert('Please assign a Cell Leader.');
       return;
     }
 
-    setSaving(true);
+    setSavingCell(true);
     try {
-      const assignedCount = selectedMembersMap.size;
+      const cellData: any = {
+        name: formName.trim(),
+        cellCode: formCellCode.trim(),
+        description: formDescription.trim(),
+        location: formLocation.trim(),
+        meetingLocation: formMeetingLocation.trim() || formLocation.trim(),
+        leaderId: formLeaderId || '',
+        leaderName: formLeaderName.trim(),
+        leaderPhone: formLeaderPhone.trim(),
+        meetingDay: formMeetingDay,
+        meetingTime: formMeetingTime,
+        meetingEndTime: formMeetingEndTime || '20:30',
+        maximumMembers: parseInt(formMaxMembers, 10) || 20,
+        status: formStatus,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (formLeaderPhoto) cellData.leaderPhoto = formLeaderPhoto;
+      if (formAssistantName.trim()) {
+        cellData.assistantLeaderId = formAssistantId || '';
+        cellData.assistantLeaderName = formAssistantName.trim();
+        cellData.assistantLeaderPhone = formAssistantPhone.trim();
+        if (formAssistantPhoto) cellData.assistantLeaderPhoto = formAssistantPhoto;
+      } else {
+        cellData.assistantLeaderId = null;
+        cellData.assistantLeaderName = null;
+        cellData.assistantLeaderPhone = null;
+        cellData.assistantLeaderPhoto = null;
+      }
+
       let targetCellId = '';
 
       if (editingCell) {
+        await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCells', editingCell.id), cellData);
         targetCellId = editingCell.id;
-        const docRef = doc(db, 'Rhema Church', 'rhema', 'careCells', editingCell.id);
-        await updateDoc(docRef, {
-          name: formName.trim(),
-          cellCode: formCellCode.trim(),
-          description: formDescription.trim(),
-          location: formLocation.trim(),
-          meetingLocation: formMeetingLocation.trim(),
-          leaderId: formLeaderId || null,
-          leaderName: formLeaderName.trim(),
-          leaderPhone: formLeaderPhone.trim(),
-          leaderPhoto: formLeaderPhoto || null,
-          assistantLeaderId: formAssistantId || null,
-          assistantLeaderName: formAssistantName.trim() || null,
-          assistantLeaderPhone: formAssistantPhone.trim() || null,
-          assistantLeaderPhoto: formAssistantPhoto || null,
-          meetingDay: formMeetingDay,
-          meetingTime: formMeetingTime.trim(),
-          meetingEndTime: formMeetingEndTime.trim(),
-          maximumMembers: Number(formMaxMembers) || 20,
-          activeMemberCount: assignedCount,
-          status: formStatus,
-          updatedAt: serverTimestamp(),
-        });
-        showToast(`Care Cell "${formName}" updated with ${assignedCount} assigned members.`);
+        showToast(`Care Cell "${formName}" updated successfully!`);
       } else {
-        const colRef = collection(db, 'Rhema Church', 'rhema', 'careCells');
-        const newDoc = await addDoc(colRef, {
-          name: formName.trim(),
-          cellCode: formCellCode.trim(),
-          description: formDescription.trim(),
-          location: formLocation.trim(),
-          meetingLocation: formMeetingLocation.trim(),
-          leaderId: formLeaderId || null,
-          leaderName: formLeaderName.trim(),
-          leaderPhone: formLeaderPhone.trim(),
-          leaderPhoto: formLeaderPhoto || null,
-          assistantLeaderId: formAssistantId || null,
-          assistantLeaderName: formAssistantName.trim() || null,
-          assistantLeaderPhone: formAssistantPhone.trim() || null,
-          assistantLeaderPhoto: formAssistantPhoto || null,
-          meetingDay: formMeetingDay,
-          meetingTime: formMeetingTime.trim(),
-          meetingEndTime: formMeetingEndTime.trim(),
-          maximumMembers: Number(formMaxMembers) || 20,
-          activeMemberCount: assignedCount,
-          status: formStatus,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+        cellData.createdAt = serverTimestamp();
+        cellData.activeMemberCount = formSelectedMembersMap.size;
+        const newDoc = await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCells'), cellData);
         targetCellId = newDoc.id;
-        showToast(`Care Cell "${formName}" created with ${assignedCount} assigned members.`);
-      }
 
-      // Sync memberships in careCellMemberships
-      if (targetCellId) {
-        try {
+        // Auto assign selected members for newly created cell
+        if (formSelectedMembersMap.size > 0) {
           const batch = writeBatch(db);
-          const memCol = collection(db, 'Rhema Church', 'rhema', 'careCellMemberships');
-          const existingSnap = await getDocs(query(memCol, where('cellId', '==', targetCellId)));
-          const existingMemberIds = new Set<string>();
-
-          existingSnap.docs.forEach((d) => {
-            const data = d.data();
-            const memId = data.memberId;
-            existingMemberIds.add(memId);
-            if (!selectedMembersMap.has(memId)) {
-              batch.update(d.ref, {
-                membershipStatus: 'Removed',
-                updatedAt: serverTimestamp(),
-              });
-            } else if (data.membershipStatus !== 'Active') {
-              batch.update(d.ref, {
-                membershipStatus: 'Active',
-                updatedAt: serverTimestamp(),
-              });
-            }
-          });
-
-          selectedMembersMap.forEach((mem) => {
-            if (!existingMemberIds.has(mem.id)) {
-              const newRef = doc(memCol);
-              batch.set(newRef, {
-                cellId: targetCellId,
-                cellCode: formCellCode.trim(),
-                cellName: formName.trim(),
-                memberId: mem.id,
-                memberName: mem.name,
-                memberPhone: mem.phone || '',
-                memberPhoto: mem.photoUrl || '',
-                locality: mem.locality || formLocation.trim() || '',
-                address: mem.address || '',
-                membershipStatus: 'Active',
-                joinedAt: serverTimestamp(),
-                updatedAt: serverTimestamp(),
-              });
-            }
-          });
-
+          for (const m of Array.from(formSelectedMembersMap.values())) {
+            const mRef = doc(collection(db, 'Rhema Church', 'rhema', 'careCellMemberships'));
+            batch.set(mRef, {
+              cellId: targetCellId,
+              cellCode: formCellCode.trim(),
+              cellName: formName.trim(),
+              memberId: m.id,
+              memberName: m.name,
+              memberPhone: m.phone || '',
+              memberPhoto: m.photoUrl || '',
+              locality: m.locality || '',
+              address: m.address || '',
+              membershipStatus: 'Active',
+              joinedAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          }
           await batch.commit();
-        } catch (memErr) {
-          console.warn('Error syncing careCellMemberships:', memErr);
         }
+
+        showToast(`Care Cell "${formName}" created successfully!`);
       }
 
       setModalOpen(false);
     } catch (err: any) {
-      console.error('[CareCellsAdminPage] Error saving cell:', err);
-      showToast(err.message || 'Error saving care cell.');
+      console.error('Error saving care cell:', err);
+      alert('Failed to save care cell: ' + (err.message || 'Unknown error'));
     } finally {
-      setSaving(false);
+      setSavingCell(false);
     }
   };
 
   const handleDeleteCell = async (cell: CareCellRecord) => {
-    if (confirm(`Permanently delete care cell "${cell.name}" (${cell.cellCode})? This action cannot be undone.`)) {
-      try {
-        await deleteDoc(doc(db, 'Rhema Church', 'rhema', 'careCells', cell.id));
-        showToast(`Care Cell "${cell.name}" deleted.`);
-        setModalOpen(false);
-      } catch (err: any) {
-        console.error('[CareCellsAdminPage] Error deleting cell:', err);
-        showToast('Error deleting care cell.');
-      }
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${cell.name}" (${cell.cellCode})?\n\nThis will permanently remove the cell.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, 'Rhema Church', 'rhema', 'careCells', cell.id));
+      showToast(`Care Cell "${cell.name}" deleted.`);
+    } catch (err: any) {
+      console.error('Error deleting care cell:', err);
+      alert('Failed to delete cell: ' + (err.message || 'Unknown error'));
     }
   };
 
-  // ── Schedule Meeting ──
-  const openMeetingModal = (cellId?: string, meetingToEdit?: CareCellMeetingRecord) => {
-    if (meetingToEdit) {
-      setEditingMeeting(meetingToEdit);
-      setMeetingCellId(meetingToEdit.cellId);
-      setMeetingTitle(meetingToEdit.title);
-      setMeetingDescription(meetingToEdit.description || '');
-      setMeetingDate(meetingToEdit.date);
-      setMeetingStartTime(meetingToEdit.startTime);
-      setMeetingEndTime(meetingToEdit.endTime || '20:30');
-      setMeetingLocation(meetingToEdit.location);
-      setMeetingType(meetingToEdit.meetingType);
-      setMeetingScripture(meetingToEdit.scripture || 'Philippians 4:6-7');
-    } else {
-      setEditingMeeting(null);
-      const target = cellId ? cells.find((c) => c.id === cellId) : cells[0];
-      setMeetingCellId(target?.id || '');
-      setMeetingTitle(target ? `${target.name} Fellowship` : 'Care Cell Fellowship & Bible Study');
-      setMeetingDescription('Weekly fellowship, Bible study, and prayer intercession');
-      setMeetingDate(new Date().toISOString().split('T')[0]);
-      setMeetingStartTime(target?.meetingTime || '19:00');
-      setMeetingEndTime(target?.meetingEndTime || '20:30');
-      setMeetingLocation(target?.meetingLocation || target?.location || '');
-      setMeetingType('Bible Study');
-      setMeetingScripture('Philippians 4:6-7');
+  // ── 5. Schedule / Edit Meeting Modal (MeetingFormModal) ─────────────────────────
+  const [meetingModalOpen, setMeetingModalOpen] = useState(false);
+  const [editingMeeting, setEditingMeeting] = useState<CareCellMeetingRecord | null>(null);
+  const [meetingCellId, setMeetingCellId] = useState('');
+  const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingType, setMeetingType] = useState('Bible Study');
+  const [meetingDate, setMeetingDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [meetingStartTime, setMeetingStartTime] = useState('19:00');
+  const [meetingEndTime, setMeetingEndTime] = useState('20:30');
+  const [meetingLocation, setMeetingLocation] = useState('');
+  const [meetingDescription, setMeetingDescription] = useState('');
+  const [meetingStatus, setMeetingStatus] = useState<'Upcoming' | 'Completed' | 'Cancelled'>('Upcoming');
+
+  // Scripture Fields
+  const [selectedBookIndex, setSelectedBookIndex] = useState(49); // Philippians
+  const [selectedChapter, setSelectedChapter] = useState(4);
+  const [selectedVerseRange, setSelectedVerseRange] = useState('6-7');
+  const [scriptureTextEn, setScriptureTextEn] = useState(
+    'Be careful for nothing; but in every thing by prayer and supplication with thanksgiving let your requests be made known unto God.'
+  );
+  const [scriptureTextTe, setScriptureTextTe] = useState(
+    'దేనినిగూర్చియు చింతపడకుడి గాని ప్రతి విషయములోను ప్రార్థన విజ్ఞాపనములచేత కృతజ్ఞతాపూర్వకముగా మీ విన్నపములు దేవునికి తెలియజేయుడి.'
+  );
+  const [loadingScripture, setLoadingScripture] = useState(false);
+  const [savingMeeting, setSavingMeeting] = useState(false);
+
+  const fetchScripture = async (bIdx: number, ch: number, vRange: string) => {
+    setLoadingScripture(true);
+    try {
+      const vNum = parseInt(vRange.split('-')[0].trim(), 10) || 1;
+      const res = await fetch(`/api/bible?book=${bIdx}&chapter=${ch}&verse=${vNum}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.engText) setScriptureTextEn(data.engText);
+        if (data.telText) setScriptureTextTe(data.telText);
+      }
+    } catch (e) {
+      console.warn('Scripture fetch error:', e);
+    } finally {
+      setLoadingScripture(false);
     }
+  };
+
+  const openCreateMeetingModal = (defaultCellId?: string) => {
+    setEditingMeeting(null);
+    const targetCell = cells.find((c) => c.id === defaultCellId) || cells[0];
+    setMeetingCellId(targetCell?.id || '');
+    setMeetingTitle('');
+    setMeetingType('Bible Study');
+    setMeetingDate(new Date().toISOString().split('T')[0]);
+    setMeetingStartTime('19:00');
+    setMeetingEndTime('20:30');
+    setMeetingLocation(targetCell?.meetingLocation || targetCell?.location || '');
+    setMeetingDescription('');
+    setMeetingStatus('Upcoming');
+    setSelectedBookIndex(49);
+    setSelectedChapter(4);
+    setSelectedVerseRange('6-7');
+    setMeetingModalOpen(true);
+  };
+
+  const openEditMeetingModal = (meeting: CareCellMeetingRecord) => {
+    setEditingMeeting(meeting);
+    setMeetingCellId(meeting.cellId);
+    setMeetingTitle(meeting.title);
+    setMeetingType(meeting.meetingType || 'Bible Study');
+    setMeetingDate(meeting.date);
+    setMeetingStartTime(meeting.startTime || '19:00');
+    setMeetingEndTime(meeting.endTime || '20:30');
+    setMeetingLocation(meeting.location || '');
+    setMeetingDescription(meeting.description || '');
+    setMeetingStatus(meeting.status);
+
+    if (meeting.bibleBook) {
+      const bIdx = ENGLISH_NAMES.findIndex((n) => n.toLowerCase() === meeting.bibleBook?.toLowerCase());
+      if (bIdx !== -1) setSelectedBookIndex(bIdx);
+    }
+    if (meeting.bibleChapter) setSelectedChapter(meeting.bibleChapter);
+    if (meeting.bibleVerse) setSelectedVerseRange(meeting.bibleVerse);
+    if (meeting.scriptureTextEn) setScriptureTextEn(meeting.scriptureTextEn);
+    if (meeting.scriptureTextTe) setScriptureTextTe(meeting.scriptureTextTe);
+
     setMeetingModalOpen(true);
   };
 
   const handleSaveMeeting = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!meetingTitle.trim() || !meetingDate) {
-      showToast('Please provide a meeting title and date.');
+    if (!meetingCellId) {
+      alert('Please select a Care Cell.');
       return;
     }
-    const targetCell = cells.find((c) => c.id === meetingCellId) || cells[0];
+    if (!meetingTitle.trim()) {
+      alert('Please enter a Meeting Title.');
+      return;
+    }
+    if (!meetingDate) {
+      alert('Please select a Meeting Date.');
+      return;
+    }
+
     setSavingMeeting(true);
     try {
+      const targetCell = cells.find((c) => c.id === meetingCellId);
+      const payload: any = {
+        cellId: meetingCellId,
+        cellCode: targetCell?.cellCode || '',
+        cellName: targetCell?.name || '',
+        title: meetingTitle.trim(),
+        meetingType,
+        date: meetingDate,
+        startTime: meetingStartTime,
+        endTime: meetingEndTime || '20:30',
+        location: meetingLocation.trim() || targetCell?.meetingLocation || '',
+        description: meetingDescription.trim(),
+        bibleBook: ENGLISH_NAMES[selectedBookIndex] || 'Philippians',
+        bibleChapter: selectedChapter,
+        bibleVerse: selectedVerseRange.trim(),
+        scriptureTextEn,
+        scriptureTextTe,
+        status: meetingStatus,
+        updatedAt: serverTimestamp(),
+      };
+
       if (editingMeeting) {
-        const docRef = doc(db, 'Rhema Church', 'rhema', 'careCellMeetings', editingMeeting.id);
-        await updateDoc(docRef, {
-          cellId: targetCell?.id || '',
-          cellCode: targetCell?.cellCode || '',
-          cellName: targetCell?.name || 'Care Cell',
-          title: meetingTitle.trim(),
-          description: meetingDescription.trim(),
-          date: meetingDate,
-          startTime: meetingStartTime.trim(),
-          endTime: meetingEndTime.trim(),
-          location: meetingLocation.trim() || targetCell?.meetingLocation || '',
-          meetingType,
-          scripture: meetingScripture.trim(),
-          updatedAt: serverTimestamp(),
-        });
-        showToast(`Meeting "${meetingTitle}" updated.`);
+        await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellMeetings', editingMeeting.id), payload);
+        showToast('Meeting updated successfully!');
       } else {
-        const meetingsCol = collection(db, 'Rhema Church', 'rhema', 'careCellMeetings');
-        await addDoc(meetingsCol, {
-          cellId: targetCell?.id || '',
-          cellCode: targetCell?.cellCode || '',
-          cellName: targetCell?.name || 'Care Cell',
-          title: meetingTitle.trim(),
-          description: meetingDescription.trim(),
-          date: meetingDate,
-          startTime: meetingStartTime.trim(),
-          endTime: meetingEndTime.trim(),
-          location: meetingLocation.trim() || targetCell?.meetingLocation || '',
-          meetingType,
-          scripture: meetingScripture.trim(),
-          status: 'Upcoming',
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-        showToast(`Meeting "${meetingTitle}" scheduled for ${targetCell?.name || 'Care Cell'}.`);
+        payload.createdAt = serverTimestamp();
+        await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellMeetings'), payload);
+        showToast('Care Cell meeting scheduled successfully!');
       }
+
       setMeetingModalOpen(false);
     } catch (err: any) {
-      console.error('[CareCellsAdminPage] Error saving meeting:', err);
-      showToast(err.message || 'Error scheduling meeting.');
+      console.error('Error saving meeting:', err);
+      alert('Failed to save meeting: ' + (err.message || 'Unknown error'));
     } finally {
       setSavingMeeting(false);
     }
   };
 
-  // ── Transfer Member ──
-  const handleTransferMember = async () => {
-    if (!memberToTransfer || !transferTargetCellId) return;
-    const targetCell = cells.find((c) => c.id === transferTargetCellId);
-    if (!targetCell) return;
+  const handleCancelMeeting = async (meeting: CareCellMeetingRecord) => {
+    const confirmed = window.confirm(
+      `Cancel Meeting:\n\nAre you sure you want to cancel the meeting "${meeting.title}" scheduled for ${meeting.date}?`
+    );
+    if (!confirmed) return;
 
+    try {
+      await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellMeetings', meeting.id), {
+        status: 'Cancelled',
+        updatedAt: serverTimestamp(),
+      });
+      showToast('Meeting has been cancelled.');
+    } catch (err: any) {
+      console.error('Error cancelling meeting:', err);
+      alert('Failed to cancel meeting.');
+    }
+  };
+
+  // ── 6. Transfer Member Modal State ───────────────────────────────────────────
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
+  const [memberToTransfer, setMemberToTransfer] = useState<CareCellMembershipRecord | null>(null);
+  const [transferTargetCellId, setTransferTargetCellId] = useState('');
+  const [transferring, setTransferring] = useState(false);
+
+  const openTransferModal = (m: CareCellMembershipRecord) => {
+    setMemberToTransfer(m);
+    const otherCell = cells.find((c) => c.id !== m.cellId);
+    setTransferTargetCellId(otherCell?.id || '');
+    setTransferModalOpen(true);
+  };
+
+  const handleConfirmTransfer = async () => {
+    if (!memberToTransfer || !transferTargetCellId) return;
     setTransferring(true);
     try {
-      const docRef = doc(db, 'Rhema Church', 'rhema', 'careCellMemberships', memberToTransfer.id);
-      await updateDoc(docRef, {
+      const targetCell = cells.find((c) => c.id === transferTargetCellId);
+      if (!targetCell) return;
+
+      const batch = writeBatch(db);
+      // Update existing record
+      const oldRef = doc(db, 'Rhema Church', 'rhema', 'careCellMemberships', memberToTransfer.id);
+      batch.update(oldRef, {
+        membershipStatus: 'Transferred',
+        transferredToCellId: targetCell.id,
+        transferredToCellName: targetCell.name,
+        updatedAt: serverTimestamp(),
+      });
+
+      // Create new record
+      const newRef = doc(collection(db, 'Rhema Church', 'rhema', 'careCellMemberships'));
+      batch.set(newRef, {
         cellId: targetCell.id,
         cellCode: targetCell.cellCode,
         cellName: targetCell.name,
+        memberId: memberToTransfer.memberId,
+        memberName: memberToTransfer.memberName,
+        memberPhone: memberToTransfer.memberPhone || '',
+        memberPhoto: memberToTransfer.memberPhoto || '',
+        locality: memberToTransfer.locality || '',
+        address: memberToTransfer.address || '',
+        membershipStatus: 'Active',
+        joinedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      showToast(`${memberToTransfer.memberName} transferred to ${targetCell.name}.`);
+
+      await batch.commit();
+      showToast(`Member transferred to ${targetCell.name}!`);
       setTransferModalOpen(false);
-      setMemberToTransfer(null);
-    } catch (err) {
-      showToast('Error transferring member.');
+    } catch (err: any) {
+      console.error('Error transferring member:', err);
+      alert('Transfer failed: ' + (err.message || 'Unknown error'));
     } finally {
       setTransferring(false);
     }
   };
 
-  const handleRemoveMembership = async (mem: CareCellMembershipRecord) => {
-    if (confirm(`Remove ${mem.memberName} from ${mem.cellName}?`)) {
-      try {
-        const docRef = doc(db, 'Rhema Church', 'rhema', 'careCellMemberships', mem.id);
-        await updateDoc(docRef, {
-          membershipStatus: 'Removed',
+  const handleRemoveMemberFromCell = async (m: CareCellMembershipRecord) => {
+    const confirmed = window.confirm(
+      `Remove Member:\n\nAre you sure you want to remove ${m.memberName} from ${m.cellName}?\n\nThis will safely update their cell membership without affecting their church account.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellMemberships', m.id), {
+        membershipStatus: 'Removed',
+        updatedAt: serverTimestamp(),
+      });
+
+      const cell = cells.find((c) => c.id === m.cellId);
+      if (cell) {
+        await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCells', cell.id), {
+          activeMemberCount: Math.max(0, (cell.activeMemberCount || 1) - 1),
           updatedAt: serverTimestamp(),
         });
-        showToast(`${mem.memberName} removed from cell.`);
-      } catch (err) {
-        showToast('Error removing member.');
       }
+
+      showToast(`${m.memberName} removed from cell.`);
+    } catch (err: any) {
+      console.error('Error removing member:', err);
+      alert('Failed to remove member.');
     }
   };
 
-  // ── Save Pastoral Visit ──
+  // ── 7. Attendance Roll-Call Tab State & Handlers ───────────────────────────────
+  const [attendanceCellId, setAttendanceCellId] = useState('');
+  const [attendanceMeetingId, setAttendanceMeetingId] = useState('');
+  const [attendanceRoster, setAttendanceRoster] = useState<Record<string, 'Present' | 'Absent' | 'Late'>>({});
+  const [savingAttendance, setSavingAttendance] = useState(false);
+
+  // Auto initialize attendance cell
+  useEffect(() => {
+    if (!attendanceCellId && cells.length > 0) {
+      setAttendanceCellId(cells[0].id);
+    }
+  }, [cells, attendanceCellId]);
+
+  // Active meetings for attendance cell
+  const attendanceMeetings = useMemo(() => {
+    return meetings.filter((m) => m.cellId === attendanceCellId);
+  }, [meetings, attendanceCellId]);
+
+  // Set default meeting for attendance
+  useEffect(() => {
+    if (attendanceMeetings.length > 0 && !attendanceMeetingId) {
+      setAttendanceMeetingId(attendanceMeetings[0].id);
+    }
+  }, [attendanceMeetings, attendanceMeetingId]);
+
+  const activeAttendanceMeeting = useMemo(() => {
+    return meetings.find((m) => m.id === attendanceMeetingId) || attendanceMeetings[0] || null;
+  }, [meetings, attendanceMeetingId, attendanceMeetings]);
+
+  const membersInAttendanceCell = useMemo(() => {
+    return memberships.filter((m) => m.cellId === attendanceCellId && m.membershipStatus === 'Active');
+  }, [memberships, attendanceCellId]);
+
+  const handleSetAttendanceStatus = (memberId: string, status: 'Present' | 'Absent' | 'Late') => {
+    setAttendanceRoster((prev) => ({
+      ...prev,
+      [memberId]: status,
+    }));
+  };
+
+  const handleSaveAttendance = async () => {
+    if (!attendanceCellId || membersInAttendanceCell.length === 0) return;
+    setSavingAttendance(true);
+    try {
+      const batch = writeBatch(db);
+      for (const m of membersInAttendanceCell) {
+        const attStatus = attendanceRoster[m.memberId] || 'Present';
+        const attRef = doc(collection(db, 'Rhema Church', 'rhema', 'careCellAttendance'));
+        batch.set(attRef, {
+          cellId: attendanceCellId,
+          meetingId: activeAttendanceMeeting?.id || null,
+          meetingTitle: activeAttendanceMeeting?.title || 'Care Cell Meeting',
+          memberId: m.memberId,
+          memberName: m.memberName,
+          attendanceStatus: attStatus,
+          date: activeAttendanceMeeting?.date || new Date().toISOString().split('T')[0],
+          recordedAt: serverTimestamp(),
+        });
+      }
+
+      if (activeAttendanceMeeting) {
+        const mRef = doc(db, 'Rhema Church', 'rhema', 'careCellMeetings', activeAttendanceMeeting.id);
+        batch.update(mRef, {
+          status: 'Completed',
+          updatedAt: serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+      showToast('Attendance roll-call saved successfully!');
+    } catch (err: any) {
+      console.error('Error saving attendance:', err);
+      alert('Failed to save attendance: ' + (err.message || 'Unknown error'));
+    } finally {
+      setSavingAttendance(false);
+    }
+  };
+
+  // ── 8. Member Locations Tab State (Map vs List, Route Planning) ───────────────
+  const [locationsViewMode, setLocationsViewMode] = useState<'map' | 'list'>('map');
+  const [locationsLocalityFilter, setLocationsLocalityFilter] = useState<string>('ALL');
+  const [locationsNeedsVisitOnly, setLocationsNeedsVisitOnly] = useState<boolean>(false);
+  const [plannedRouteMemberIds, setPlannedRouteMemberIds] = useState<string[]>([]);
+
+  const handleToggleRoute = (memberId: string) => {
+    setPlannedRouteMemberIds((prev) =>
+      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId]
+    );
+  };
+
+  const handleOpenMultiStopRoute = (membersToRoute: CareCellMembershipRecord[]) => {
+    if (membersToRoute.length === 0) return;
+    const dest = encodeURIComponent(membersToRoute[membersToRoute.length - 1].address || membersToRoute[membersToRoute.length - 1].locality || 'Koilakuntla');
+    const waypoints = membersToRoute
+      .slice(0, membersToRoute.length - 1)
+      .map((m) => encodeURIComponent(m.address || m.locality || ''))
+      .filter(Boolean)
+      .join('|');
+
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}${waypoints ? `&waypoints=${waypoints}` : ''}&travelmode=driving`;
+    window.open(url, '_blank');
+  };
+
+  // ── 9. Visits Tab State ───────────────────────────────────────────────────────
+  const [visitModalOpen, setVisitModalOpen] = useState(false);
+  const [visitCellId, setVisitCellId] = useState('');
+  const [visitMemberId, setVisitMemberId] = useState('');
+  const [visitMemberName, setVisitMemberName] = useState('');
+  const [visitMemberPhone, setVisitMemberPhone] = useState('');
+  const [visitDate, setVisitDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [visitTime, setVisitTime] = useState('18:00');
+  const [visitPurpose, setVisitPurpose] = useState('Family Blessing');
+  const [visitLocation, setVisitLocation] = useState('');
+  const [visitAssignedVisitors, setVisitAssignedVisitors] = useState('Pastor & Care Cell Leader');
+  const [visitNotes, setVisitNotes] = useState('');
+  const [savingVisit, setSavingVisit] = useState(false);
+  const [visitStatusFilter, setVisitStatusFilter] = useState<'ALL' | 'Scheduled' | 'Completed' | 'Cancelled'>('ALL');
+
+  const openScheduleVisitModal = () => {
+    const targetCell = cells.find((c) => c.id === selectedCellFilter) || cells[0];
+    setVisitCellId(targetCell?.id || '');
+    setVisitMemberId('');
+    setVisitMemberName('');
+    setVisitMemberPhone('');
+    setVisitDate(new Date().toISOString().split('T')[0]);
+    setVisitTime('18:00');
+    setVisitPurpose('Family Blessing');
+    setVisitLocation(targetCell?.meetingLocation || targetCell?.location || '');
+    setVisitAssignedVisitors('Pastor & Care Cell Leader');
+    setVisitNotes('');
+    setVisitModalOpen(true);
+  };
+
   const handleSaveVisit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!visitMemberName.trim() || !visitDate) {
-      showToast('Please provide member name and visit date.');
+    if (!visitCellId || !visitMemberName.trim()) {
+      alert('Please select Care Cell and Member name.');
       return;
     }
     setSavingVisit(true);
     try {
-      const targetCell = cells.find((c) => c.id === visitCellId) || cells[0];
-      const colRef = collection(db, 'Rhema Church', 'rhema', 'careCellVisits');
-      await addDoc(colRef, {
-        cellId: targetCell?.id || '',
+      const targetCell = cells.find((c) => c.id === visitCellId);
+      await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellVisits'), {
+        cellId: visitCellId,
         cellName: targetCell?.name || 'Care Cell',
         memberId: visitMemberId || 'guest',
         memberName: visitMemberName.trim(),
@@ -1085,28 +1343,67 @@ export default function CareCellsAdminPage() {
         status: 'Scheduled',
         createdAt: serverTimestamp(),
       });
-      showToast(`Pastoral visit scheduled for ${visitMemberName}.`);
+      showToast('Pastoral visit scheduled successfully!');
       setVisitModalOpen(false);
-    } catch (err) {
-      showToast('Error scheduling visit.');
+    } catch (err: any) {
+      console.error('Error saving visit:', err);
+      alert('Failed to save visit.');
     } finally {
       setSavingVisit(false);
     }
   };
 
-  // ── Save Follow-up ──
+  const handleMarkVisitCompleted = async (v: CareCellVisitRecord) => {
+    try {
+      await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellVisits', v.id), {
+        status: 'Completed',
+        completedAt: serverTimestamp(),
+      });
+      showToast('Visit marked as completed!');
+    } catch (err: any) {
+      console.error('Error marking visit completed:', err);
+    }
+  };
+
+  // ── 10. Follow-ups Tab State ──────────────────────────────────────────────────
+  const [followupModalOpen, setFollowupModalOpen] = useState(false);
+  const [followupCellId, setFollowupCellId] = useState('');
+  const [followupMemberId, setFollowupMemberId] = useState('');
+  const [followupMemberName, setFollowupMemberName] = useState('');
+  const [followupMemberPhone, setFollowupMemberPhone] = useState('');
+  const [followupType, setFollowupType] = useState('Phone Call');
+  const [followupReason, setFollowupReason] = useState('Missed 2+ Meetings');
+  const [followupNotes, setFollowupNotes] = useState('');
+  const [followupNextActionDate, setFollowupNextActionDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [savingFollowup, setSavingFollowup] = useState(false);
+
+  const openLogFollowupModal = (defaultMember?: CareCellMembershipRecord) => {
+    const targetCell = defaultMember
+      ? cells.find((c) => c.id === defaultMember.cellId) || cells[0]
+      : cells.find((c) => c.id === selectedCellFilter) || cells[0];
+
+    setFollowupCellId(targetCell?.id || '');
+    setFollowupMemberId(defaultMember?.memberId || '');
+    setFollowupMemberName(defaultMember?.memberName || '');
+    setFollowupMemberPhone(defaultMember?.memberPhone || '');
+    setFollowupType('Phone Call');
+    setFollowupReason('Missed 2+ Meetings');
+    setFollowupNotes('');
+    setFollowupNextActionDate(new Date().toISOString().split('T')[0]);
+    setFollowupModalOpen(true);
+  };
+
   const handleSaveFollowup = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!followupMemberName.trim()) {
-      showToast('Please select or enter member name.');
+    if (!followupCellId || !followupMemberName.trim()) {
+      alert('Please select Care Cell and Member.');
       return;
     }
     setSavingFollowup(true);
     try {
-      const targetCell = cells.find((c) => c.id === followupCellId) || cells[0];
-      const colRef = collection(db, 'Rhema Church', 'rhema', 'careCellFollowups');
-      await addDoc(colRef, {
-        cellId: targetCell?.id || '',
+      const targetCell = cells.find((c) => c.id === followupCellId);
+      await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellFollowups'), {
+        cellId: followupCellId,
         cellName: targetCell?.name || 'Care Cell',
         memberId: followupMemberId || 'guest',
         memberName: followupMemberName.trim(),
@@ -1115,249 +1412,356 @@ export default function CareCellsAdminPage() {
         reason: followupReason,
         notes: followupNotes.trim(),
         nextActionDate: followupNextActionDate,
-        status: followupStatus,
+        status: 'Pending',
         createdAt: serverTimestamp(),
       });
-      showToast(`Care follow-up logged for ${followupMemberName}.`);
+      showToast('Follow-up logged successfully!');
       setFollowupModalOpen(false);
-    } catch (err) {
-      showToast('Error saving follow-up.');
+    } catch (err: any) {
+      console.error('Error saving follow-up:', err);
+      alert('Failed to log follow-up.');
     } finally {
       setSavingFollowup(false);
     }
   };
 
-  // ── Save Announcement ──
+  const handleResolveFollowup = async (f: CareCellFollowupRecord) => {
+    try {
+      await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellFollowups', f.id), {
+        status: 'Completed',
+        resolvedAt: serverTimestamp(),
+      });
+      showToast('Follow-up marked as resolved!');
+    } catch (err: any) {
+      console.error('Error resolving follow-up:', err);
+    }
+  };
+
+  // ── 11. Notices & Prayer Tab State ───────────────────────────────────────────
+  const [announcePrayerSection, setAnnouncePrayerSection] = useState<'prayers' | 'announcements'>('prayers');
+  const [noticeModalOpen, setNoticeModalOpen] = useState(false);
+  const [noticeCellId, setNoticeCellId] = useState('');
+  const [noticeTitle, setNoticeTitle] = useState('');
+  const [noticeMessage, setNoticeMessage] = useState('');
+  const [noticePriority, setNoticePriority] = useState<'Normal' | 'High' | 'Urgent'>('Normal');
+  const [savingNotice, setSavingNotice] = useState(false);
+
+  const [prayerModalOpen, setPrayerModalOpen] = useState(false);
+  const [prayerCellId, setPrayerCellId] = useState('');
+  const [prayerMemberName, setPrayerMemberName] = useState('');
+  const [prayerCategory, setPrayerCategory] = useState('Healing / Health');
+  const [prayerRequestText, setPrayerRequestText] = useState('');
+  const [savingPrayer, setSavingPrayer] = useState(false);
+
   const handleSaveNotice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!noticeTitle.trim() || !noticeMessage.trim()) {
-      showToast('Please provide notice title and message.');
-      return;
-    }
+    if (!noticeTitle.trim() || !noticeMessage.trim()) return;
     setSavingNotice(true);
     try {
       const targetCell = cells.find((c) => c.id === noticeCellId);
-      const colRef = collection(db, 'Rhema Church', 'rhema', 'careCellAnnouncements');
-      await addDoc(colRef, {
-        cellId: noticeCellId,
-        cellName: targetCell ? targetCell.name : 'All Cells',
+      await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellAnnouncements'), {
+        cellId: noticeCellId || 'ALL',
+        cellName: targetCell ? targetCell.name : 'All Care Cells',
         title: noticeTitle.trim(),
         message: noticeMessage.trim(),
         priority: noticePriority,
         createdAt: serverTimestamp(),
       });
-      showToast('Notice broadcasted successfully.');
+      showToast('Announcement broadcasted successfully!');
       setNoticeModalOpen(false);
       setNoticeTitle('');
       setNoticeMessage('');
-    } catch (err) {
-      showToast('Error posting notice.');
+    } catch (err: any) {
+      console.error('Error broadcasting announcement:', err);
     } finally {
       setSavingNotice(false);
     }
   };
 
-  // ── Save Prayer Request ──
   const handleSavePrayer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!prayerMemberName.trim() || !prayerRequest.trim()) {
-      showToast('Please enter member name and prayer request.');
-      return;
-    }
+    if (!prayerMemberName.trim() || !prayerRequestText.trim()) return;
     setSavingPrayer(true);
     try {
-      const targetCell = cells.find((c) => c.id === prayerCellId) || cells[0];
-      const colRef = collection(db, 'Rhema Church', 'rhema', 'careCellPrayerRequests');
-      await addDoc(colRef, {
-        cellId: targetCell?.id || '',
-        cellName: targetCell?.name || 'Care Cell',
-        memberId: prayerMemberId || 'guest',
+      const targetCell = cells.find((c) => c.id === prayerCellId);
+      await addDoc(collection(db, 'Rhema Church', 'rhema', 'careCellPrayerRequests'), {
+        cellId: prayerCellId || 'ALL',
+        cellName: targetCell ? targetCell.name : 'All Care Cells',
+        memberId: 'member',
         memberName: prayerMemberName.trim(),
         category: prayerCategory,
-        request: prayerRequest.trim(),
+        request: prayerRequestText.trim(),
         status: 'Active',
         createdAt: serverTimestamp(),
       });
-      showToast('Prayer request submitted.');
+      showToast('Prayer petition added successfully!');
       setPrayerModalOpen(false);
-      setPrayerRequest('');
-    } catch (err) {
-      showToast('Error saving prayer request.');
+      setPrayerMemberName('');
+      setPrayerRequestText('');
+    } catch (err: any) {
+      console.error('Error saving prayer petition:', err);
     } finally {
       setSavingPrayer(false);
     }
   };
 
-  const formatTimeDisplay = (timeStr: string) => {
-    if (!timeStr) return '';
-    const parts = timeStr.split(':');
-    if (parts.length < 2) return timeStr;
-    const h = parseInt(parts[0], 10);
-    const m = parts[1];
-    if (isNaN(h)) return timeStr;
-    const period = h >= 12 ? 'PM' : 'AM';
-    const h12 = h % 12 || 12;
-    return `${h12}:${m} ${period}`;
-  };
+  // ── Filtered Records for Active Tab ───────────────────────────────────────────
+  const filteredCells = useMemo(() => {
+    return cells.filter((c) => {
+      if (statusFilter !== 'All' && c.status !== statusFilter) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          c.name.toLowerCase().includes(q) ||
+          c.cellCode.toLowerCase().includes(q) ||
+          c.leaderName.toLowerCase().includes(q) ||
+          c.location.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [cells, statusFilter, searchQuery]);
 
-  const activeCount = statusCounts.Active;
+  const filteredMemberships = useMemo(() => {
+    return memberships.filter((m) => {
+      if (selectedCellFilter !== 'ALL' && m.cellId !== selectedCellFilter) return false;
+      if (m.membershipStatus !== 'Active') return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        return (
+          m.memberName.toLowerCase().includes(q) ||
+          (m.memberPhone && m.memberPhone.includes(q)) ||
+          m.cellName.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [memberships, selectedCellFilter, searchQuery]);
+
+  // Meetings filtered by active cell AND selected calendar month/year
+  const filteredMeetings = useMemo(() => {
+    return meetings.filter((m) => {
+      if (selectedCellFilter !== 'ALL' && m.cellId !== selectedCellFilter) return false;
+      if (m.date) {
+        const d = new Date(m.date);
+        if (!isNaN(d.getTime())) {
+          if (d.getMonth() + 1 !== selectedMonth || d.getFullYear() !== selectedYear) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+  }, [meetings, selectedCellFilter, selectedMonth, selectedYear]);
+
+  // Calculate meetings in selected month count for analytics
+  const meetingsInSelectedMonthCount = useMemo(() => {
+    return meetings.filter((m) => {
+      if (m.date) {
+        const d = new Date(m.date);
+        if (!isNaN(d.getTime())) {
+          return d.getMonth() + 1 === selectedMonth && d.getFullYear() === selectedYear;
+        }
+      }
+      return false;
+    }).length;
+  }, [meetings, selectedMonth, selectedYear]);
+
+  const activeLeadersCount = useMemo(() => {
+    const set = new Set<string>();
+    cells.forEach((c) => {
+      if (c.leaderName && c.status === 'Active') set.add(c.leaderName);
+    });
+    return set.size;
+  }, [cells]);
+
+  const totalAssignedMembers = useMemo(() => {
+    return memberships.filter((m) => m.membershipStatus === 'Active').length;
+  }, [memberships]);
+
+  // Export CSV of members
+  const handleExportCSV = () => {
+    const listToExport = filteredMemberships;
+    if (listToExport.length === 0) {
+      alert('No members to export.');
+      return;
+    }
+    const headers = ['Member Name', 'Phone', 'Care Cell Code', 'Care Cell Name', 'Locality', 'Address'];
+    const rows = listToExport.map((m) => [
+      `"${m.memberName}"`,
+      `"${m.memberPhone || ''}"`,
+      `"${m.cellCode || ''}"`,
+      `"${m.cellName || ''}"`,
+      `"${m.locality || ''}"`,
+      `"${m.address || ''}"`,
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `CareCell_Members_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
-        <div className="space-y-6 max-w-7xl mx-auto pb-16">
-          {/* ── HERO HEADER (Exact Mobile Parity: media_1795697244620_d515e20e.jpg) ── */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200">
+        <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+          {/* Toast Alert */}
+          {toastMessage && (
+            <div className="fixed top-6 right-6 z-50 bg-emerald-600 text-white px-5 py-3 rounded-2xl shadow-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-4">
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+              <span className="text-sm font-semibold">{toastMessage}</span>
+            </div>
+          )}
+
+          {/* Top Title & Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Care Cells</h1>
-              <p className="text-sm font-semibold text-slate-500 mt-0.5">
-                {activeCount} active fellowship {activeCount === 1 ? 'group' : 'groups'}
+              <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full w-fit mb-1 border border-emerald-200">
+                <Sparkles className="w-3.5 h-3.5" />
+                Firebase Live Production Mode · Care Cells Oversight
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">Care Cells</h1>
+              <p className="text-sm text-slate-500 mt-0.5">
+                {cells.filter((c) => c.status === 'Active').length} active fellowship groups across canonical church network
               </p>
             </div>
-            <div className="flex items-center gap-3">
+
+            <div className="flex items-center gap-2">
               <Button
                 onClick={openCreateModal}
-                className="bg-black hover:bg-slate-900 text-white rounded-full px-5 py-2 font-bold text-sm shadow-sm flex items-center gap-2"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-md text-sm font-semibold flex items-center gap-1.5"
               >
                 <Plus className="w-4 h-4" />
-                New Cell
+                + New Cell
               </Button>
             </div>
           </div>
 
-          {/* Toast Notification */}
-          {toastMessage && (
-            <div className="p-3.5 bg-slate-900 text-white text-sm rounded-xl shadow-lg flex items-center justify-between animate-in fade-in slide-in-from-top-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                <span>{toastMessage}</span>
-              </div>
-              <button onClick={() => setToastMessage(null)} className="text-slate-400 hover:text-white">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {/* ── SUBTABS NAVIGATION (ALL 9 MOBILE TABS: Overview, Care Cells, Members, Locations, Meetings, Attendance, Visits, Follow-ups, Notices & Prayer) ── */}
-          <div className="flex items-center gap-1.5 border-b border-slate-200 pb-2 overflow-x-auto scrollbar-none">
+          {/* Subtabs Navigation Bar (All 9 Mobile Subtabs) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-slate-200">
             {SUB_TABS.map((tab) => {
-              const isActive = activeSubTab === tab.key;
               const Icon = tab.icon;
+              const isActive = activeSubTab === tab.key;
               return (
                 <button
                   key={tab.key}
                   onClick={() => setActiveSubTab(tab.key)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all ${
                     isActive
                       ? 'bg-slate-900 text-white shadow-sm'
                       : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>
-                    {tab.label}
-                    {tab.key === 'manage' && ` (${cells.length})`}
-                  </span>
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                  {tab.key === 'manage' && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                        isActive ? 'bg-slate-800 text-slate-200' : 'bg-slate-100 text-slate-600'
+                      }`}
+                    >
+                      {cells.length}
+                    </span>
+                  )}
                 </button>
               );
             })}
           </div>
 
-          {/* ── 1. OVERVIEW TAB (Exact Mobile Parity: media_1795697244620_d515e20e.jpg) ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 1: OVERVIEW                                                           */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'overview' && (
             <div className="space-y-6">
-              {/* Analytics Period Bar (Interactive Calendar Arrows & Month Picker) */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative">
+              {/* Interactive Calendar Analytics Period Filter */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700">
+                  <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
                     <Calendar className="w-5 h-5" />
                   </div>
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                      ANALYTICS PERIOD
-                    </span>
-                    <div
-                      onClick={() => setShowMonthYearPicker((prev) => !prev)}
-                      className="flex items-center gap-1.5 cursor-pointer hover:opacity-80 transition-opacity"
+                  <div className="relative">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Analytics Period</p>
+                    <button
+                      onClick={() => setShowMonthYearPicker(!showMonthYearPicker)}
+                      className="text-base font-extrabold text-slate-900 flex items-center gap-1.5 hover:text-emerald-700 transition-colors"
                     >
-                      <span className="text-base font-extrabold text-slate-900">
-                        {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-                      </span>
-                      <ChevronDown className="w-4 h-4 text-slate-500" />
-                    </div>
+                      {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+                      <ChevronDown className="w-4 h-4 text-slate-400" />
+                    </button>
+
+                    {/* Quick Month & Year Picker Dropdown */}
+                    {showMonthYearPicker && (
+                      <div className="absolute top-full left-0 mt-2 z-30 bg-white border border-slate-200 rounded-2xl shadow-xl p-4 w-64 animate-in fade-in">
+                        <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-100">
+                          <span className="text-xs font-bold text-slate-700">Select Month & Year</span>
+                          <div className="flex items-center gap-1">
+                            {[2025, 2026, 2027].map((yr) => (
+                              <button
+                                key={yr}
+                                onClick={() => setSelectedYear(yr)}
+                                className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                  selectedYear === yr ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'
+                                }`}
+                              >
+                                {yr}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {MONTH_NAMES.map((name, idx) => (
+                            <button
+                              key={name}
+                              onClick={() => {
+                                setSelectedMonth(idx + 1);
+                                setShowMonthYearPicker(false);
+                              }}
+                              className={`py-1.5 px-1 rounded-lg text-xs font-semibold text-center transition-all ${
+                                selectedMonth === idx + 1
+                                  ? 'bg-emerald-600 text-white font-bold'
+                                  : 'text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {name.slice(0, 3)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-center">
+                {/* Arrow Controls */}
+                <div className="flex items-center gap-2">
                   <button
-                    type="button"
                     onClick={handlePrevMonth}
-                    className="w-9 h-9 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center justify-center text-slate-600 transition-colors"
                     title="Previous Month"
+                    className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 active:scale-95 transition-transform"
                   >
                     <ChevronLeft className="w-4 h-4" />
                   </button>
                   <button
-                    type="button"
                     onClick={handleNextMonth}
-                    className="w-9 h-9 rounded-xl border border-slate-200 hover:bg-slate-50 flex items-center justify-center text-slate-600 transition-colors"
                     title="Next Month"
+                    className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 active:scale-95 transition-transform"
                   >
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
-
-                {/* Dropdown Month & Year Picker */}
-                {showMonthYearPicker && (
-                  <div className="absolute top-full left-4 mt-2 z-30 bg-white border border-slate-200 rounded-2xl p-4 shadow-xl max-w-sm w-full animate-in fade-in zoom-in-95">
-                    <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
-                      <span className="text-xs font-bold text-slate-800 uppercase">Select Period</span>
-                      <div className="flex gap-1">
-                        {[2025, 2026, 2027].map((y) => (
-                          <button
-                            key={y}
-                            onClick={() => setSelectedYear(y)}
-                            className={`px-2 py-0.5 rounded text-xs font-bold ${
-                              selectedYear === y ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {y}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {MONTH_NAMES.map((mName, idx) => {
-                        const mNum = idx + 1;
-                        const isSel = selectedMonth === mNum;
-                        return (
-                          <button
-                            key={mName}
-                            onClick={() => {
-                              setSelectedMonth(mNum);
-                              setShowMonthYearPicker(false);
-                            }}
-                            className={`py-1.5 px-2 rounded-xl text-xs font-semibold text-center transition-all ${
-                              isSel ? 'bg-blue-600 text-white font-bold' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                            }`}
-                          >
-                            {mName.slice(0, 3)}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* Cell Filter Pills (Matching Mobile: All Cells (1), Rhema_CareCell-001) */}
+              {/* Top Cell Filter Chips */}
               <div className="flex items-center gap-2 overflow-x-auto pb-1">
                 <button
                   onClick={() => setSelectedCellFilter('ALL')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                     selectedCellFilter === 'ALL'
                       ? 'bg-slate-900 text-white shadow-sm'
-                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                   }`}
                 >
                   All Cells ({cells.length})
@@ -1365,405 +1769,485 @@ export default function CareCellsAdminPage() {
                 {cells.map((c) => (
                   <button
                     key={c.id}
-                    onClick={() => setSelectedCellFilter(c.cellCode)}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                      selectedCellFilter === c.cellCode
+                    onClick={() => setSelectedCellFilter(c.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      selectedCellFilter === c.id
                         ? 'bg-slate-900 text-white shadow-sm'
-                        : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    {c.cellCode}
+                    {c.cellCode} ({c.name})
                   </button>
                 ))}
               </div>
 
-              {/* ── DIRECT ACTIONS (Positioned at Top as requested, Exact Mobile Parity) ── */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+              {/* Direct Leadership Actions Row */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-2 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    DIRECT ACTIONS
-                  </span>
-                  <span className="text-[11px] font-semibold text-slate-400">
-                    Quick Leadership Actions
-                  </span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-400">Direct Actions</span>
+                  <span className="text-[11px] text-slate-400 font-medium">Quick Leadership Actions</span>
                 </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Button 1: New Care Cell */}
-                  <button
-                    type="button"
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  <Button
                     onClick={openCreateModal}
-                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:shadow"
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-2"
                   >
-                    <PlusCircle className="w-4 h-4 text-white" />
-                    <span>+ Create New Care Cell</span>
-                  </button>
-
-                  {/* Button 2: Schedule Meeting */}
-                  <button
-                    type="button"
-                    onClick={() => openMeetingModal()}
-                    className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:border-slate-300"
+                    <Plus className="w-3.5 h-3.5" />
+                    + Create Care Cell
+                  </Button>
+                  <Button
+                    onClick={() => openCreateMeetingModal(selectedCellFilter === 'ALL' ? undefined : selectedCellFilter)}
+                    className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-2"
                   >
-                    <CalendarPlus className="w-4 h-4 text-blue-600" />
-                    <span>Schedule Meeting</span>
-                  </button>
-
-                  {/* Button 3: Mark Attendance */}
-                  <button
-                    type="button"
+                    <CalendarPlus className="w-3.5 h-3.5 text-slate-600" />
+                    Schedule Meeting
+                  </Button>
+                  <Button
                     onClick={() => setActiveSubTab('attendance')}
-                    className="bg-white hover:bg-emerald-50 border border-slate-200 text-slate-800 hover:text-emerald-700 rounded-xl px-4 py-2.5 text-xs font-bold shadow-sm flex items-center gap-2 transition-all hover:border-emerald-300"
+                    className="bg-white hover:bg-slate-50 text-slate-800 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-2"
                   >
-                    <ClipboardCheck className="w-4 h-4 text-emerald-600" />
-                    <span>Mark Attendance</span>
-                  </button>
+                    <ClipboardCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    Mark Attendance
+                  </Button>
                 </div>
               </div>
 
-              {/* 6 Metric Cards (Exact Mobile Parity: media_1795697244620_d515e20e.jpg) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {/* 1. Total Care Cells */}
-                <div
-                  onClick={() => setActiveSubTab('manage')}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-center text-blue-600">
-                      <Building2 className="w-5 h-5" />
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
+              {/* KPI Metrics Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <Building2 className="w-5 h-5 text-emerald-600" />
+                    <ChevronRight className="w-4 h-4" />
                   </div>
-                  <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">{statusCounts.All}</div>
-                    <h4 className="text-sm font-bold text-slate-800 mt-1">Total Care Cells</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      {statusCounts.Active} active · {statusCounts.Inactive} inactive
-                    </p>
-                  </div>
-                </div>
-
-                {/* 2. Assigned Members */}
-                <div
-                  onClick={() => setActiveSubTab('members')}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 border border-purple-200 flex items-center justify-center text-purple-600">
-                      <Users className="w-5 h-5" />
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">{totalEnrolledCount}</div>
-                    <h4 className="text-sm font-bold text-slate-800 mt-1">Assigned Members</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Enrolled cell members</p>
-                  </div>
-                </div>
-
-                {/* 3. Cell Leaders */}
-                <div
-                  onClick={() => setActiveSubTab('manage')}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
-                      <UserCheck className="w-5 h-5" />
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">{totalLeadersCount || 1}</div>
-                    <h4 className="text-sm font-bold text-slate-800 mt-1">Cell Leaders</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Leaders & Assistants</p>
-                  </div>
-                </div>
-
-                {/* 4. Avg. Attendance */}
-                <div
-                  onClick={() => setActiveSubTab('attendance')}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-600">
-                      <TrendingUp className="w-5 h-5" />
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">0%</div>
-                    <h4 className="text-sm font-bold text-slate-800 mt-1">Avg. Attendance</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Monthly participation rate</p>
-                  </div>
-                </div>
-
-                {/* 5. Meetings in Selected Month */}
-                <div
-                  onClick={() => setActiveSubTab('meetings')}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 flex items-center justify-center text-teal-600">
-                      <Calendar className="w-5 h-5" />
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">{meetingsThisMonth.length}</div>
-                    <h4 className="text-sm font-bold text-slate-800 mt-1">
-                      Meetings in {MONTH_NAMES[selectedMonth - 1].slice(0, 3)}
-                    </h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Fellowships conducted</p>
-                  </div>
-                </div>
-
-                {/* 6. Care Follow-ups */}
-                <div
-                  onClick={() => setActiveSubTab('followups')}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
-                      <AlertCircle className="w-5 h-5" />
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-300" />
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-3xl font-extrabold text-slate-900">
-                      {followups.filter((f) => f.status === 'Pending').length}
-                    </div>
-                    <h4 className="text-sm font-bold text-slate-800 mt-1">Care Follow-ups</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">Pending pastoral check-ins</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Guidelines Philosophy Banner */}
-              <div className="p-4 bg-amber-50/70 border border-amber-200/80 rounded-2xl flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                    Rhema Care Cell Philosophy
-                  </h4>
-                  <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
-                    Care Cells foster deep fellowship, pastoral warmth, and authentic Bible study. Cell leaders guide
-                    their members through prayer, regular follow-up visits, and active attendance roll-calls.
+                  <h3 className="text-2xl font-black text-slate-900">{cells.length}</h3>
+                  <p className="text-xs font-bold text-slate-700">Total Care Cells</p>
+                  <p className="text-[11px] text-slate-400">
+                    {cells.filter((c) => c.status === 'Active').length} active · {cells.filter((c) => c.status !== 'Active').length} inactive
                   </p>
                 </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <Users className="w-5 h-5 text-indigo-600" />
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-2xl font-black text-slate-900">{totalAssignedMembers}</h3>
+                  <p className="text-xs font-bold text-slate-700">Assigned Members</p>
+                  <p className="text-[11px] text-slate-400">Enrolled cell members</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <UserCheck className="w-5 h-5 text-emerald-600" />
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-2xl font-black text-slate-900">{activeLeadersCount}</h3>
+                  <p className="text-xs font-bold text-slate-700">Cell Leaders</p>
+                  <p className="text-[11px] text-slate-400">Leaders & Assistants</p>
+                </div>
+
+                <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-1">
+                  <div className="flex items-center justify-between text-slate-400">
+                    <Calendar className="w-5 h-5 text-amber-600" />
+                    <ChevronRight className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-2xl font-black text-slate-900">{meetingsInSelectedMonthCount}</h3>
+                  <p className="text-xs font-bold text-slate-700">Meetings in {MONTH_NAMES[selectedMonth - 1]}</p>
+                  <p className="text-[11px] text-slate-400">{selectedYear} fellowship gatherings</p>
+                </div>
+              </div>
+
+              {/* Pastoral Care & Fellowship Mission Banner */}
+              <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-emerald-950 text-white rounded-2xl p-6 shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                <div className="space-y-1.5 max-w-2xl">
+                  <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold">
+                    <Heart className="w-4 h-4" />
+                    Pastoral Care & Cell Health Philosophy
+                  </div>
+                  <h3 className="text-lg font-bold">Connecting Believers Beyond Sunday Services</h3>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    Care Cells empower small-group discipleship, localized Bible study, home visitations, and immediate
+                    pastoral response for every church family in their own neighbourhood.
+                  </p>
+                </div>
+                <Button
+                  onClick={() => setActiveSubTab('manage')}
+                  className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold whitespace-nowrap shadow"
+                >
+                  Manage Care Cells →
+                </Button>
               </div>
             </div>
           )}
 
-          {/* ── 2. CARE CELLS MANAGE TAB ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 2: CARE CELLS MANAGEMENT (Cards with Leader, Capacity, Edit, Delete)   */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'manage' && (
             <div className="space-y-6">
-              {/* Filter Pills & Search Bar */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+              {/* Filter & Search Bar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
                   {(['All', 'Active', 'Inactive', 'Archived'] as const).map((st) => (
                     <button
                       key={st}
                       onClick={() => setStatusFilter(st)}
-                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                         statusFilter === st
-                          ? 'bg-slate-900 text-white shadow-sm'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                       }`}
                     >
-                      {st} ({statusCounts[st]})
+                      {st} ({st === 'All' ? cells.length : cells.filter((c) => c.status === st).length})
                     </button>
                   ))}
                 </div>
 
-                <div className="relative flex-1 max-w-md">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Search by cell name, code, leader, location..."
+                    placeholder="Search cell or leader..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-8 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
-                  {searchQuery && (
-                    <button
-                      onClick={() => setSearchQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
                 </div>
               </div>
 
-              {/* Grid of Care Cells */}
+              {/* Care Cells Grid */}
               {loading ? (
-                <div className="py-20 flex flex-col items-center justify-center text-slate-500">
-                  <Loader2 className="w-8 h-8 animate-spin text-blue-600 mb-2" />
-                  <p className="text-sm">Loading care cells...</p>
+                <div className="py-20 text-center space-y-2">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto text-emerald-600" />
+                  <p className="text-xs text-slate-500 font-medium">Loading Care Cells...</p>
                 </div>
               ) : filteredCells.length === 0 ? (
-                <div className="py-16 text-center bg-white rounded-2xl border border-slate-200 p-8">
-                  <Building2 className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <h3 className="text-base font-bold text-slate-800">No Care Cells Found</h3>
-                  <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                    No care cells matched your search or status filter. Try clearing filters or create a new care cell.
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+                  <Building2 className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-700">No Care Cells Found</h3>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Create a new Care Cell fellowship group to begin assigning local members and scheduling gatherings.
                   </p>
-                  <Button onClick={openCreateModal} className="mt-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold">
-                    <Plus className="w-4 h-4 mr-1.5" />
-                    Create Care Cell
+                  <Button
+                    onClick={openCreateModal}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"
+                  >
+                    + Create First Care Cell
                   </Button>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                   {filteredCells.map((cell) => {
-                    const capacityPct = Math.min(
-                      100,
-                      Math.round(((cell.activeMemberCount || 0) / (cell.maximumMembers || 20)) * 100)
+                    const cellMembers = memberships.filter(
+                      (m) => m.cellId === cell.id && m.membershipStatus === 'Active'
                     );
+                    const capacityPercent = Math.min(
+                      100,
+                      Math.round((cellMembers.length / (cell.maximumMembers || 20)) * 100)
+                    );
+
                     return (
                       <div
                         key={cell.id}
-                        className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
+                        className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow flex flex-col justify-between space-y-4"
                       >
-                        <div className="space-y-4">
-                          {/* Card Header */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400">
-                                  {cell.cellCode}
-                                </span>
-                                {cell.location && (
-                                  <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                    <MapPin className="w-2.5 h-2.5" />
-                                    {cell.location}
-                                  </span>
-                                )}
-                              </div>
-                              <h3 className="text-base font-bold text-slate-900 mt-1">{cell.name}</h3>
-                            </div>
+                        <div className="space-y-3">
+                          {/* Header Code & Status */}
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-lg border border-slate-200">
+                              {cell.cellCode}
+                            </span>
                             <span
-                              className={`text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full ${
+                              className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
                                 cell.status === 'Active'
                                   ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                  : cell.status === 'Inactive'
-                                  ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                  : 'bg-slate-100 text-slate-600'
                               }`}
                             >
                               {cell.status}
                             </span>
                           </div>
 
-                          {cell.description && (
-                            <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{cell.description}</p>
-                          )}
+                          {/* Cell Name & Description */}
+                          <div>
+                            <h3 className="text-base font-extrabold text-slate-900">{cell.name}</h3>
+                            {cell.description ? (
+                              <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{cell.description}</p>
+                            ) : null}
+                          </div>
 
-                          {/* Leader Information */}
-                          <div className="p-3 bg-slate-50 rounded-xl space-y-2 border border-slate-100">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
-                                  {cell.leaderName
-                                    .split(' ')
-                                    .map((n) => n[0])
-                                    .join('')
-                                    .slice(0, 2)
-                                    .toUpperCase()}
-                                </div>
-                                <div className="min-w-0">
-                                  <span className="text-xs font-bold text-slate-900 block truncate">
-                                    {cell.leaderName}
-                                  </span>
-                                  <span className="text-[10px] text-slate-500 block">Cell Leader</span>
-                                </div>
-                              </div>
-                              {cell.leaderPhone && (
-                                <a
-                                  href={`tel:${cell.leaderPhone}`}
-                                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                                >
-                                  <Phone className="w-3 h-3" />
-                                  {cell.leaderPhone}
-                                </a>
-                              )}
+                          {/* Leader & Assistant */}
+                          <div className="p-3 bg-slate-50 rounded-xl space-y-1.5 border border-slate-100 text-xs">
+                            <div className="flex items-center gap-2 text-slate-800">
+                              <User className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+                              <span className="font-bold">{cell.leaderName}</span>
+                              <span className="text-[10px] bg-slate-200 text-slate-700 px-1.5 rounded">Leader</span>
                             </div>
-
+                            {cell.leaderPhone && (
+                              <p className="text-[11px] text-slate-500 pl-5.5">{cell.leaderPhone}</p>
+                            )}
                             {cell.assistantLeaderName && (
-                              <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-xs">
-                                <div className="flex items-center gap-1.5 text-slate-600 truncate">
-                                  <UserCheck className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                                  <span className="truncate">{cell.assistantLeaderName}</span>
-                                </div>
-                                <span className="text-[10px] font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full">
-                                  Assistant
-                                </span>
+                              <div className="pt-1 border-t border-slate-200 text-[11px] text-slate-600">
+                                Assistant: <span className="font-semibold text-slate-800">{cell.assistantLeaderName}</span>
                               </div>
                             )}
                           </div>
 
-                          {/* Meeting Schedule Details */}
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                              <span className="text-[10px] font-bold text-slate-400 block uppercase">Meeting Day</span>
-                              <span className="font-bold text-slate-800 mt-0.5 block flex items-center gap-1">
-                                <Calendar className="w-3 h-3 text-slate-500" />
-                                {cell.meetingDay}
+                          {/* Meeting Schedule & Venue */}
+                          <div className="space-y-1 text-xs text-slate-600">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                              <span>
+                                Every {cell.meetingDay} · {cell.meetingTime}
+                                {cell.meetingEndTime ? ` – ${cell.meetingEndTime}` : ''}
                               </span>
                             </div>
-                            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100">
-                              <span className="text-[10px] font-bold text-slate-400 block uppercase">Time</span>
-                              <span className="font-bold text-slate-800 mt-0.5 block flex items-center gap-1">
-                                <Clock className="w-3 h-3 text-slate-500" />
-                                {formatTimeDisplay(cell.meetingTime)}
-                              </span>
+                            <div className="flex items-center gap-2">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="truncate">{cell.meetingLocation || cell.location || 'Koilakuntla'}</span>
                             </div>
                           </div>
 
-                          {/* Capacity / Active Members */}
-                          <div>
-                            <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                              <span className="text-slate-500">Enrolled Members</span>
-                              <span className="text-slate-800 font-bold">
-                                {cell.activeMemberCount || 0} / {cell.maximumMembers || 20} ({capacityPct}%)
+                          {/* Roster Capacity Progress Bar */}
+                          <div className="space-y-1 pt-1">
+                            <div className="flex justify-between text-[11px] font-semibold text-slate-600">
+                              <span>Roster Capacity</span>
+                              <span>
+                                {cellMembers.length} / {cell.maximumMembers} ({capacityPercent}%)
                               </span>
                             </div>
-                            <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
                               <div
-                                className={`h-full transition-all duration-300 ${
-                                  capacityPct >= 90 ? 'bg-rose-500' : capacityPct >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
+                                className={`h-full rounded-full transition-all ${
+                                  capacityPercent >= 90 ? 'bg-amber-500' : 'bg-emerald-500'
                                 }`}
-                                style={{ width: `${capacityPct}%` }}
+                                style={{ width: `${capacityPercent}%` }}
                               />
                             </div>
                           </div>
                         </div>
 
                         {/* Card Actions */}
-                        <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="secondary"
+                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                          <button
+                            onClick={() => {
+                              setSelectedCellFilter(cell.id);
+                              setActiveSubTab('members');
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5"
+                          >
+                            <Users className="w-3 h-3" />
+                            Members
+                          </button>
+                          <button
+                            onClick={() => {
+                              setSelectedCellFilter(cell.id);
+                              setActiveSubTab('meetings');
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1.5"
+                          >
+                            <Calendar className="w-3 h-3" />
+                            Meetings
+                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
                               onClick={() => openEditModal(cell)}
-                              className="h-8 px-3 text-xs flex items-center gap-1.5 border border-slate-200"
+                              title="Edit Cell"
+                              className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
                             >
                               <Edit2 className="w-3.5 h-3.5" />
-                              Edit
-                            </Button>
-                            <Button
-                              variant="secondary"
-                              onClick={() => openMeetingModal(cell.id)}
-                              className="h-8 px-2.5 text-xs flex items-center gap-1 border border-slate-200 text-blue-700 bg-blue-50/50 hover:bg-blue-50"
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCell(cell)}
+                              title="Delete Cell"
+                              className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
                             >
-                              <CalendarPlus className="w-3.5 h-3.5" />
-                              Meeting
-                            </Button>
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 3: MEMBERS DIRECTORY (Active Cell Banner, Add Members Modal Trigger)   */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {activeSubTab === 'members' && (
+            <div className="space-y-6">
+              {/* Cell Selector Horizontal Chips */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <button
+                  onClick={() => setSelectedCellFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    selectedCellFilter === 'ALL'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  All Cells ({memberships.filter((m) => m.membershipStatus === 'Active').length})
+                </button>
+                {cells.map((c) => {
+                  const mCount = memberships.filter((m) => m.cellId === c.id && m.membershipStatus === 'Active').length;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => setSelectedCellFilter(c.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                        selectedCellFilter === c.id
+                          ? 'bg-slate-900 text-white shadow-sm'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {c.cellCode} ({mCount})
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Active Cell Banner Matching Mobile CareCellMembersTab */}
+              {activeSelectedCell && (
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-black text-slate-900">
+                      {activeSelectedCell.cellCode} · {activeSelectedCell.name}
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Leader:{' '}
+                      <span className="font-bold text-slate-800">{activeSelectedCell.leaderName}</span> ·{' '}
+                      {memberships.filter((m) => m.cellId === activeSelectedCell.id && m.membershipStatus === 'Active').length}{' '}
+                      of {activeSelectedCell.maximumMembers} members enrolled
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setSelectedCellFilter(activeSelectedCell.id);
+                        setActiveSubTab('locations');
+                      }}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 border border-slate-200 transition-colors"
+                    >
+                      <MapPin className="w-3.5 h-3.5 text-slate-500" />
+                      Map
+                    </button>
+                    <button
+                      onClick={handleExportCSV}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 border border-slate-200 transition-colors"
+                    >
+                      <Download className="w-3.5 h-3.5 text-slate-500" />
+                      Export
+                    </button>
+                    <Button
+                      onClick={() => openAddMembersModalForCell(activeSelectedCell)}
+                      className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      Assign Members
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Search Bar */}
+              <div className="relative w-full max-w-md">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter assigned members by name, phone or code..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              {/* Members List Cards */}
+              {filteredMemberships.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+                  <Users className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-700">No Members Enrolled</h3>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    {searchQuery
+                      ? `No enrolled members match "${searchQuery}".`
+                      : 'Click "Assign Members" above to assign church members to this cell with zero duplication.'}
+                  </p>
+                  {activeSelectedCell && (
+                    <Button
+                      onClick={() => openAddMembersModalForCell(activeSelectedCell)}
+                      className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
+                    >
+                      <UserPlus className="w-3.5 h-3.5 mr-1.5" />
+                      Assign Members
+                    </Button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredMemberships.map((m) => {
+                    const initials =
+                      m.memberName
+                        ?.split(' ')
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((p) => p[0]?.toUpperCase())
+                        .join('') || 'M';
+
+                    return (
+                      <div
+                        key={m.id}
+                        className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3 hover:border-slate-300 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {m.memberPhoto ? (
+                            <img
+                              src={m.memberPhoto}
+                              alt={m.memberName}
+                              className="w-10 h-10 rounded-full object-cover border border-slate-200 flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs flex-shrink-0">
+                              {initials}
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <h4 className="text-xs font-extrabold text-slate-900 truncate">{m.memberName}</h4>
+                            {m.memberPhone && (
+                              <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <span>{m.memberPhone}</span>
+                              </p>
+                            )}
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-semibold">
+                                {m.cellCode}
+                              </span>
+                              {m.locality && (
+                                <span className="text-[10px] text-slate-400 truncate">· {m.locality}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-1 flex-shrink-0">
                           <button
-                            onClick={() => handleDeleteCell(cell)}
-                            className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors"
-                            title="Delete Care Cell"
+                            onClick={() => openTransferModal(m)}
+                            title="Transfer to another cell"
+                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleRemoveMemberFromCell(m)}
+                            title="Remove from cell"
+                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors border border-rose-200"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
@@ -1774,48 +2258,32 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── 3. MEMBERS DIRECTORY TAB ── */}
-          {activeSubTab === 'members' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Enrolled Fellowship Members</h3>
-                  <p className="text-xs text-slate-500">
-                    Manage members enrolled across active care cells with direct transfers and contact info
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={openCreateModal}
-                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    Assign Members
-                  </Button>
-                </div>
-              </div>
-
-              {/* Cell Filter & Search Bar */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 4: MEMBER LOCATIONS (Interactive Map vs List View, Multi-stop Route)  */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {activeSubTab === 'locations' && (
+            <div className="space-y-6">
+              {/* Cell Selector & Mode Toggles */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
                   <button
                     onClick={() => setSelectedCellFilter('ALL')}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                       selectedCellFilter === 'ALL'
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
-                    All Cells ({memberships.length})
+                    All Cells
                   </button>
                   {cells.map((c) => (
                     <button
                       key={c.id}
-                      onClick={() => setSelectedCellFilter(c.cellCode)}
-                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-                        selectedCellFilter === c.cellCode
-                          ? 'bg-slate-900 text-white shadow-xs'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      onClick={() => setSelectedCellFilter(c.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                        selectedCellFilter === c.id
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
                       }`}
                     >
                       {c.cellCode}
@@ -1823,595 +2291,609 @@ export default function CareCellsAdminPage() {
                   ))}
                 </div>
 
-                <div className="relative max-w-xs w-full">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    placeholder="Search member..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+                    <button
+                      onClick={() => setLocationsViewMode('map')}
+                      className={`px-3 py-1 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+                        locationsViewMode === 'map' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                      }`}
+                    >
+                      <MapIcon className="w-3.5 h-3.5" />
+                      Map
+                    </button>
+                    <button
+                      onClick={() => setLocationsViewMode('list')}
+                      className={`px-3 py-1 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+                        locationsViewMode === 'list' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                      }`}
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      List
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {filteredDirectoryMembers.length === 0 ? (
-                <div className="py-12 text-center text-slate-400 text-xs">No care cell members found.</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
-                  {filteredDirectoryMembers.map((m) => (
-                    <div
-                      key={m.id}
-                      className="p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col justify-between"
-                    >
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">
-                            {m.cellCode || m.cellName}
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                            Active
-                          </span>
-                        </div>
+              {/* Locality Filter Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                <button
+                  onClick={() => setLocationsLocalityFilter('ALL')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    locationsLocalityFilter === 'ALL'
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  All Localities
+                </button>
+                {uniqueLocalities.map((loc) => (
+                  <button
+                    key={loc}
+                    onClick={() => setLocationsLocalityFilter(loc)}
+                    className={`px-3 py-1 rounded-xl text-xs font-semibold transition-all whitespace-nowrap flex items-center gap-1 ${
+                      locationsLocalityFilter === loc
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <MapPin className="w-3 h-3 text-slate-400" />
+                    {loc}
+                  </button>
+                ))}
+              </div>
 
-                        <div className="flex items-center gap-3 pt-1">
-                          <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0">
-                            {m.memberName
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .slice(0, 2)
-                              .toUpperCase()}
+              {/* Multi-Stop Visit Route Planning Banner */}
+              {plannedRouteMemberIds.length > 0 && (
+                <div className="bg-emerald-900 text-white p-4 rounded-2xl shadow-md flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <Navigation className="w-5 h-5 text-emerald-300" />
+                    <span className="text-xs font-bold">
+                      {plannedRouteMemberIds.length} members selected for pastoral visit route
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() =>
+                        handleOpenMultiStopRoute(
+                          memberships.filter((m) => plannedRouteMemberIds.includes(m.memberId))
+                        )
+                      }
+                      className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl shadow transition-colors flex items-center gap-1.5"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Open Multi-Stop Route in Maps
+                    </button>
+                    <button
+                      onClick={() => setPlannedRouteMemberIds([])}
+                      className="p-1.5 text-emerald-200 hover:text-white"
+                      title="Clear route selection"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* View Rendering */}
+              {locationsViewMode === 'map' ? (
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm space-y-4 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900">Geographic Fellowship Zone</h3>
+                      <p className="text-xs text-slate-500">
+                        Visualizing active care cell members plotted across {activeSelectedCell?.location || 'Koilakuntla'}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="relative w-full h-[450px] bg-slate-100 rounded-xl overflow-hidden border border-slate-200 flex items-center justify-center">
+                    <iframe
+                      title="Care Cell Map"
+                      className="w-full h-full border-0"
+                      src={`https://maps.google.com/maps?q=${encodeURIComponent(
+                        activeSelectedCell?.location || 'Koilakuntla, Andhra Pradesh'
+                      )}&t=&z=14&ie=UTF8&iwloc=&output=embed`}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredMemberships
+                    .filter((m) => {
+                      if (locationsLocalityFilter !== 'ALL') {
+                        return (m.locality || '').toLowerCase() === locationsLocalityFilter.toLowerCase();
+                      }
+                      return true;
+                    })
+                    .map((m) => {
+                      const inRoute = plannedRouteMemberIds.includes(m.memberId);
+                      return (
+                        <div
+                          key={m.id}
+                          className={`bg-white border rounded-2xl p-4 shadow-sm space-y-3 transition-colors ${
+                            inRoute ? 'border-emerald-500 ring-1 ring-emerald-500 bg-emerald-50/20' : 'border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h4 className="text-xs font-extrabold text-slate-900">{m.memberName}</h4>
+                              <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                <Phone className="w-3 h-3 text-slate-400" />
+                                <span>{m.memberPhone || 'No phone'}</span>
+                              </p>
+                              {m.locality && (
+                                <p className="text-[11px] text-emerald-700 flex items-center gap-1 font-semibold mt-0.5">
+                                  <MapPin className="w-3 h-3 text-emerald-600" />
+                                  <span>{m.locality}</span>
+                                </p>
+                              )}
+                              {m.address && (
+                                <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">{m.address}</p>
+                              )}
+                            </div>
+
+                            <button
+                              onClick={() => handleToggleRoute(m.memberId)}
+                              className={`p-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                                inRoute
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                              }`}
+                              title={inRoute ? 'Remove from visit route' : 'Add to visit route'}
+                            >
+                              {inRoute ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                            </button>
                           </div>
-                          <div className="min-w-0">
-                            <span className="text-sm font-bold text-slate-900 block truncate">{m.memberName}</span>
-                            <span className="text-xs text-slate-500 block">{m.memberPhone || 'No phone'}</span>
-                            {m.locality && (
-                              <span className="text-[10px] text-slate-400 block truncate">📍 {m.locality}</span>
+
+                          <div className="pt-2 border-t border-slate-100 flex items-center gap-2">
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                m.address || m.locality || 'Koilakuntla'
+                              )}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-lg flex items-center gap-1"
+                            >
+                              <Navigation className="w-3 h-3 text-slate-500" />
+                              Navigate
+                            </a>
+                            {m.memberPhone && (
+                              <a
+                                href={`tel:${m.memberPhone}`}
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-lg flex items-center gap-1"
+                              >
+                                <Phone className="w-3 h-3 text-slate-500" />
+                                Call
+                              </a>
+                            )}
+                            {m.memberPhone && (
+                              <a
+                                href={`https://wa.me/${m.memberPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                                  `Praise the Lord ${m.memberName}! Greetings from Rhema Church Care Cell.`
+                                )}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-lg flex items-center gap-1 border border-emerald-200"
+                              >
+                                <MessageCircle className="w-3 h-3 text-emerald-600" />
+                                WhatsApp
+                              </a>
                             )}
                           </div>
                         </div>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                        {m.memberPhone ? (
-                          <a
-                            href={`tel:${m.memberPhone}`}
-                            className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                          >
-                            <Phone className="w-3.5 h-3.5" />
-                            Call
-                          </a>
-                        ) : (
-                          <div />
-                        )}
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setMemberToTransfer(m);
-                              setTransferTargetCellId(cells[0]?.id || '');
-                              setTransferModalOpen(true);
-                            }}
-                            className="text-[11px] font-semibold text-slate-600 hover:text-blue-600 px-2 py-1 rounded-lg hover:bg-slate-100 flex items-center gap-1"
-                            title="Transfer to Another Cell"
-                          >
-                            <ArrowRightLeft className="w-3 h-3" />
-                            Transfer
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveMembership(m)}
-                            className="text-[11px] font-semibold text-rose-600 hover:text-rose-700 px-2 py-1 rounded-lg hover:bg-rose-50"
-                            title="Remove from Cell"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
           )}
 
-          {/* ── 4. MEMBER LOCATIONS TAB (Matching CareCellMapModal in Mobile) ── */}
-          {activeSubTab === 'locations' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <MapPin className="w-5 h-5 text-blue-600" />
-                    Member Locations & Fellowship Zones
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Proximity matching of congregation residential addresses to Care Cell meeting venues
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-slate-600">Filter Cell:</span>
-                  <select
-                    value={selectedCellFilter}
-                    onChange={(e) => setSelectedCellFilter(e.target.value)}
-                    className="px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50"
-                  >
-                    <option value="ALL">All Care Cells</option>
-                    {cells.map((c) => (
-                      <option key={c.id} value={c.cellCode}>
-                        {c.name} ({c.cellCode})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Fellowship Zone Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {cells.map((c) => {
-                  const cellMems = memberships.filter(
-                    (m) => (m.cellId === c.id || m.cellCode === c.cellCode) && m.membershipStatus === 'Active'
-                  );
-                  return (
-                    <div key={c.id} className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
-                          {c.cellCode}
-                        </span>
-                        <span className="text-xs font-bold text-slate-700">{cellMems.length} Members</span>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-900">{c.name}</h4>
-                        <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span>Venue: {c.meetingLocation || c.location}</span>
-                        </p>
-                      </div>
-
-                      <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                          c.meetingLocation || c.location
-                        )}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-800"
-                      >
-                        <Navigation className="w-3 h-3" />
-                        Open Meeting Venue in Google Maps
-                      </a>
-
-                      <div className="pt-2 border-t border-slate-200/80 space-y-1">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Enrolled Members in this Locality:
-                        </span>
-                        <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
-                          {cellMems.map((mem) => (
-                            <div
-                              key={mem.id}
-                              className="p-2 bg-white rounded-lg border border-slate-200 flex items-center justify-between text-xs"
-                            >
-                              <div className="min-w-0">
-                                <span className="font-semibold text-slate-900 block truncate">{mem.memberName}</span>
-                                <span className="text-[10px] text-slate-400 block truncate">
-                                  {mem.locality || mem.address || 'Locality Saved'}
-                                </span>
-                              </div>
-                              {mem.memberPhone && (
-                                <a href={`tel:${mem.memberPhone}`} className="text-slate-500 hover:text-blue-600 p-1">
-                                  <Phone className="w-3 h-3" />
-                                </a>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* ── 5. MEETINGS TAB (Matching CareCellMeetingsTab in Mobile) ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 5: MEETINGS (Mobile CareCellMeetingsTab Exact Parity)                   */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'meetings' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-teal-600" />
-                    Care Cell Fellowship Meetings
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Schedule, edit, and track weekly home Bible study and worship gatherings
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    onClick={() => openMeetingModal()}
-                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+            <div className="space-y-6">
+              {/* Cell Selector Row */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <button
+                  onClick={() => setSelectedCellFilter('ALL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                    selectedCellFilter === 'ALL'
+                      ? 'bg-slate-900 text-white shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  All Cells
+                </button>
+                {cells.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setSelectedCellFilter(c.id)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                      selectedCellFilter === c.id
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
                   >
-                    <CalendarPlus className="w-4 h-4" />
+                    {c.cellCode}
+                  </button>
+                ))}
+              </div>
+
+              {/* Period & Schedule Meeting Row Matching Mobile */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handlePrevMonth}
+                    className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 active:scale-95 transition-transform"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className="text-base font-extrabold text-slate-900">
+                    {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+                  </span>
+                  <button
+                    onClick={handleNextMonth}
+                    className="p-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-slate-700 active:scale-95 transition-transform"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <Button
+                  onClick={() => openCreateMeetingModal(selectedCellFilter === 'ALL' ? undefined : selectedCellFilter)}
+                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow"
+                >
+                  <CalendarPlus className="w-4 h-4" />
+                  Schedule Meeting
+                </Button>
+              </div>
+
+              {/* Status Filter Chips */}
+              <div className="flex items-center gap-2">
+                {(['All', 'Upcoming', 'Completed', 'Cancelled'] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => {}}
+                    className="px-3 py-1 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-xs font-semibold text-slate-700"
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+
+              {/* Meetings List */}
+              {filteredMeetings.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center space-y-3">
+                  <Calendar className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h3 className="text-sm font-bold text-slate-700">No Meetings in {MONTH_NAMES[selectedMonth - 1]} {selectedYear}</h3>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    There are no scheduled Care Cell meetings for this calendar period. Use the button below to schedule one.
+                  </p>
+                  <Button
+                    onClick={() => openCreateMeetingModal(selectedCellFilter === 'ALL' ? undefined : selectedCellFilter)}
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
+                  >
+                    <CalendarPlus className="w-3.5 h-3.5 mr-1.5" />
                     Schedule Meeting
                   </Button>
                 </div>
-              </div>
-
-              {filteredMeetings.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 space-y-2">
-                  <Calendar className="w-10 h-10 mx-auto text-slate-300" />
-                  <p className="text-xs">No meetings scheduled for this period.</p>
-                  <Button onClick={() => openMeetingModal()} variant="secondary" className="text-xs">
-                    + Schedule First Meeting
-                  </Button>
-                </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredMeetings.map((item) => (
-                    <div
-                      key={item.id}
-                      className="p-5 rounded-2xl border border-slate-200 bg-white hover:shadow-md transition-all flex flex-col justify-between"
-                    >
-                      <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {filteredMeetings.map((item) => {
+                    const isUpcoming = item.status === 'Upcoming';
+                    const isCompleted = item.status === 'Completed';
+                    const isCancelled = item.status === 'Cancelled';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`bg-white border rounded-2xl p-5 shadow-sm space-y-4 ${
+                          isCancelled ? 'opacity-60 border-slate-200 bg-slate-50/50' : 'border-slate-200'
+                        }`}
+                      >
+                        {/* Top Badges */}
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
-                            {item.cellCode} · {item.cellName}
+                          <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-lg">
+                            {item.meetingType || 'Fellowship'}
                           </span>
                           <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              item.status === 'Completed'
+                            className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                              isUpcoming
+                                ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : isCompleted
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : item.status === 'Cancelled'
-                                ? 'bg-slate-100 text-slate-600'
-                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                                : 'bg-rose-50 text-rose-700 border border-rose-200'
                             }`}
                           >
                             {item.status}
                           </span>
                         </div>
 
+                        {/* Title & Cell */}
                         <div>
-                          <h4 className="text-base font-bold text-slate-900">{item.title}</h4>
-                          <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full inline-block mt-1">
-                            {item.meetingType}
-                          </span>
+                          <h3 className="text-base font-extrabold text-slate-900">{item.title}</h3>
+                          <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                            {item.cellCode ? `${item.cellCode} — ` : ''}
+                            {item.cellName || 'Care Cell'}
+                          </p>
                         </div>
 
-                        {item.scripture && (
-                          <div className="p-2.5 bg-slate-50 rounded-xl text-xs text-slate-700 flex items-center gap-2">
-                            <BookOpen className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                            <span>Scripture: {item.scripture}</span>
-                          </div>
-                        )}
-
-                        <div className="space-y-1 text-xs text-slate-600">
-                          <div className="flex items-center gap-2">
+                        {/* Schedule & Venue Meta */}
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                          <div className="flex items-center gap-1.5">
                             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                            <span className="font-semibold">{item.date}</span>
+                            <span>{item.date}</span>
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <Clock className="w-3.5 h-3.5 text-slate-400" />
                             <span>
-                              {formatTimeDisplay(item.startTime)} - {formatTimeDisplay(item.endTime || '20:30')}
+                              {item.startTime}
+                              {item.endTime ? ` – ${item.endTime}` : ''}
                             </span>
                           </div>
                           {item.location && (
-                            <div className="flex items-center gap-2">
-                              <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            <div className="flex items-center gap-1.5 truncate">
+                              <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                               <span className="truncate">{item.location}</span>
                             </div>
                           )}
                         </div>
-                      </div>
 
-                      <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            setAttendanceCellId(item.cellId);
-                            setAttendanceDate(item.date);
-                            setActiveSubTab('attendance');
-                          }}
-                          className="h-8 px-2.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 flex items-center gap-1"
-                        >
-                          <ClipboardCheck className="w-3.5 h-3.5" />
-                          Attendance
-                        </Button>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="secondary"
-                            onClick={() => openMeetingModal(item.cellId, item)}
-                            className="h-8 px-2 text-xs border border-slate-200"
-                          >
-                            <Edit2 className="w-3 h-3" />
-                          </Button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              if (confirm(`Cancel meeting "${item.title}"?`)) {
-                                await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellMeetings', item.id), {
-                                  status: 'Cancelled',
-                                  updatedAt: serverTimestamp(),
-                                });
-                                showToast('Meeting cancelled.');
-                              }
-                            }}
-                            className="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-rose-50"
-                            title="Cancel Meeting"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
+                        {/* Scripture Reading Box */}
+                        {item.bibleBook && (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
+                              <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>
+                                {item.bibleBook} {item.bibleChapter}:{item.bibleVerse}
+                              </span>
+                            </div>
+                            {item.scriptureTextEn && (
+                              <p className="text-[11px] text-slate-600 italic line-clamp-2">
+                                "{item.scriptureTextEn}"
+                              </p>
+                            )}
+                            {item.scriptureTextTe && (
+                              <p className="text-[11px] text-emerald-800 line-clamp-2">
+                                "{item.scriptureTextTe}"
+                              </p>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Description */}
+                        {item.description && (
+                          <p className="text-xs text-slate-500 line-clamp-2">{item.description}</p>
+                        )}
+
+                        {/* Action Buttons Row */}
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                          {!isCancelled && (
+                            <button
+                              onClick={() => {
+                                setAttendanceCellId(item.cellId);
+                                setAttendanceMeetingId(item.id);
+                                setActiveSubTab('attendance');
+                              }}
+                              className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                            >
+                              <ClipboardCheck className="w-3.5 h-3.5" />
+                              {isCompleted ? 'Review Attendance' : 'Mark Attendance'}
+                            </button>
+                          )}
+
+                          <div className="flex items-center gap-1 ml-auto">
+                            <button
+                              onClick={() => openEditMeetingModal(item)}
+                              title="Edit Meeting"
+                              className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            {!isCancelled && isUpcoming && (
+                              <button
+                                onClick={() => handleCancelMeeting(item)}
+                                title="Cancel Meeting"
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors border border-rose-200"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
           )}
 
-          {/* ── 6. ATTENDANCE TAB (Roll-call for Care Cells) ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 6: ATTENDANCE (Roll-call with Present / Absent / Late Pills)           */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'attendance' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <ClipboardCheck className="w-5 h-5 text-emerald-600" />
-                    Care Cell Attendance Roll-Call
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Record weekly meeting attendance for enrolled care cell fellowship members
-                  </p>
+            <div className="space-y-6">
+              {/* Meeting Selector Banner */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Attendance Roll-Call</span>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select
+                      value={attendanceCellId}
+                      onChange={(e) => {
+                        setAttendanceCellId(e.target.value);
+                        setAttendanceMeetingId('');
+                      }}
+                      className="px-3 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl"
+                    >
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    {attendanceMeetings.length > 0 && (
+                      <select
+                        value={attendanceMeetingId}
+                        onChange={(e) => setAttendanceMeetingId(e.target.value)}
+                        className="px-3 py-1.5 text-xs font-bold bg-slate-50 border border-slate-200 rounded-xl"
+                      >
+                        {attendanceMeetings.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.title} ({m.date})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  {/* Select Cell */}
-                  <select
-                    value={attendanceCellId}
-                    onChange={(e) => setAttendanceCellId(e.target.value)}
-                    className="px-3 py-1.5 text-xs font-bold border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {cells.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name} ({c.cellCode})
-                      </option>
-                    ))}
-                  </select>
-
-                  {/* Select Date */}
-                  <input
-                    type="date"
-                    value={attendanceDate}
-                    onChange={(e) => setAttendanceDate(e.target.value)}
-                    className="px-3 py-1.5 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+                <Button
+                  onClick={handleSaveAttendance}
+                  disabled={savingAttendance || membersInAttendanceCell.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow flex items-center gap-2"
+                >
+                  {savingAttendance ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardCheck className="w-4 h-4" />}
+                  Save Attendance Roll-Call
+                </Button>
               </div>
 
-              {memberships.filter((m) => m.cellId === attendanceCellId).length === 0 ? (
-                <div className="py-12 text-center text-slate-400 text-xs">
+              {/* Roster Roll-Call List */}
+              {membersInAttendanceCell.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
                   No active members enrolled in this cell. Assign members in the Members tab first.
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden">
-                    {memberships
-                      .filter((m) => m.cellId === attendanceCellId)
-                      .map((m) => {
-                        const cur = attendanceRoster[m.memberId] || 'Present';
-                        return (
-                          <div key={m.id} className="p-3 bg-white flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0">
-                                {m.memberName
-                                  .split(' ')
-                                  .map((n) => n[0])
-                                  .join('')
-                                  .slice(0, 2)
-                                  .toUpperCase()}
-                              </div>
-                              <div className="min-w-0">
-                                <span className="text-xs font-bold text-slate-900 block truncate">{m.memberName}</span>
-                                <span className="text-[10px] text-slate-500 truncate block">
-                                  {m.memberPhone} {m.locality ? `· ${m.locality}` : ''}
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => setAttendanceRoster((prev) => ({ ...prev, [m.memberId]: 'Present' }))}
-                                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
-                                  cur === 'Present'
-                                    ? 'bg-emerald-600 text-white shadow-xs'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                }`}
-                              >
-                                Present
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setAttendanceRoster((prev) => ({ ...prev, [m.memberId]: 'Absent' }))}
-                                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
-                                  cur === 'Absent'
-                                    ? 'bg-rose-600 text-white shadow-xs'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                }`}
-                              >
-                                Absent
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setAttendanceRoster((prev) => ({ ...prev, [m.memberId]: 'Late' }))}
-                                className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all ${
-                                  cur === 'Late'
-                                    ? 'bg-amber-500 text-white shadow-xs'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                }`}
-                              >
-                                Late
-                              </button>
-                            </div>
+                <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm divide-y divide-slate-100">
+                  {membersInAttendanceCell.map((m) => {
+                    const status = attendanceRoster[m.memberId] || 'Present';
+                    return (
+                      <div key={m.id} className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs">
+                            {m.memberName.slice(0, 1)}
                           </div>
-                        );
-                      })}
-                  </div>
+                          <div>
+                            <h4 className="text-xs font-extrabold text-slate-900">{m.memberName}</h4>
+                            <p className="text-[11px] text-slate-500">{m.memberPhone || 'No phone'}</p>
+                          </div>
+                        </div>
 
-                  <div className="flex justify-end pt-2">
-                    <Button
-                      onClick={async () => {
-                        setSavingAttendance(true);
-                        try {
-                          const col = collection(db, 'Rhema Church', 'rhema', 'careCellAttendance');
-                          await addDoc(col, {
-                            cellId: attendanceCellId,
-                            date: attendanceDate,
-                            roster: attendanceRoster,
-                            recordedAt: serverTimestamp(),
-                          });
-                          showToast('Care Cell Attendance saved successfully!');
-                        } catch (err: any) {
-                          showToast('Error saving attendance.');
-                        } finally {
-                          setSavingAttendance(false);
-                        }
-                      }}
-                      disabled={savingAttendance}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-5"
-                    >
-                      {savingAttendance ? <Loader2 className="w-4 h-4 animate-spin mr-1.5" /> : <Check className="w-4 h-4 mr-1.5" />}
-                      Save Attendance Roll-Call
-                    </Button>
-                  </div>
+                        {/* Status Pills */}
+                        <div className="flex items-center gap-2">
+                          {(['Present', 'Absent', 'Late'] as const).map((st) => {
+                            const isSelected = status === st;
+                            return (
+                              <button
+                                key={st}
+                                onClick={() => handleSetAttendanceStatus(m.memberId, st)}
+                                className={`px-3 py-1 rounded-xl text-xs font-bold transition-all ${
+                                  isSelected
+                                    ? st === 'Present'
+                                      ? 'bg-emerald-600 text-white'
+                                      : st === 'Absent'
+                                      ? 'bg-rose-600 text-white'
+                                      : 'bg-amber-500 text-white'
+                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                }`}
+                              >
+                                {st}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           )}
 
-          {/* ── 7. VISITS TAB (Pastoral Visits to Cell Members) ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 7: VISITS (Pastoral Home & Hospital Care Visits)                       */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'visits' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <Home className="w-5 h-5 text-indigo-600" />
-                    Pastoral Care Visits
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Coordinate home visitations, hospital visits, and pastoral encouragement for care cell families
-                  </p>
+                  <h3 className="text-base font-extrabold text-slate-900">Pastoral Care Visits</h3>
+                  <p className="text-xs text-slate-500">Track home and hospital visitations for church families</p>
                 </div>
                 <Button
-                  onClick={() => {
-                    setVisitCellId(cells[0]?.id || '');
-                    setVisitModalOpen(true);
-                  }}
+                  onClick={openScheduleVisitModal}
                   className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
                 >
-                  <Plus className="w-4 h-4" />
-                  Schedule Pastoral Visit
+                  <Plus className="w-3.5 h-3.5" />
+                  Schedule Visit
                 </Button>
               </div>
 
-              {filteredVisits.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 space-y-2">
-                  <Home className="w-10 h-10 mx-auto text-slate-300" />
-                  <p className="text-xs">No pastoral visits scheduled.</p>
-                  <Button
-                    onClick={() => {
-                      setVisitCellId(cells[0]?.id || '');
-                      setVisitModalOpen(true);
-                    }}
-                    variant="secondary"
-                    className="text-xs"
-                  >
-                    + Schedule First Visit
-                  </Button>
+              {visits.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
+                  No pastoral visits logged yet. Click "Schedule Visit" to log a visit.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredVisits.map((v) => (
-                    <div
-                      key={v.id}
-                      className="p-5 rounded-2xl border border-slate-200 bg-white hover:shadow-md transition-all flex flex-col justify-between"
-                    >
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
-                            {v.cellName}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              v.status === 'Completed'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-blue-50 text-blue-700 border border-blue-200'
-                            }`}
-                          >
-                            {v.status}
-                          </span>
-                        </div>
+                  {visits.map((v) => (
+                    <div key={v.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          {v.purpose}
+                        </span>
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                            v.status === 'Completed'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-blue-50 text-blue-700'
+                          }`}
+                        >
+                          {v.status}
+                        </span>
+                      </div>
 
-                        <div>
-                          <h4 className="text-base font-bold text-slate-900">{v.memberName}</h4>
-                          <span className="text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full inline-block mt-1">
-                            {v.purpose}
-                          </span>
-                        </div>
+                      <div>
+                        <h4 className="text-xs font-extrabold text-slate-900">{v.memberName}</h4>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <Phone className="w-3 h-3 text-slate-400" />
+                          <span>{v.memberPhone || 'No phone'}</span>
+                        </p>
+                      </div>
 
-                        <div className="space-y-1 text-xs text-slate-600">
-                          <div className="flex items-center gap-2">
-                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                            <span>
-                              {v.visitDate} {v.visitTime ? `at ${v.visitTime}` : ''}
-                            </span>
+                      <div className="text-xs text-slate-600 space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{v.visitDate} {v.visitTime ? `at ${v.visitTime}` : ''}</span>
+                        </div>
+                        {v.location && (
+                          <div className="flex items-center gap-1.5 truncate">
+                            <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                            <span className="truncate">{v.location}</span>
                           </div>
-                          {v.location && (
-                            <div className="flex items-center gap-2">
-                              <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                              <span className="truncate">{v.location}</span>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2">
-                            <Users className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Visitors: {v.assignedVisitors}</span>
-                          </div>
-                        </div>
-
-                        {v.notes && (
-                          <p className="text-xs text-slate-500 italic bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                            "{v.notes}"
+                        )}
+                        {v.assignedVisitors && (
+                          <p className="text-[11px] text-slate-500 pt-1">
+                            Team: <span className="font-semibold text-slate-700">{v.assignedVisitors}</span>
                           </p>
                         )}
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                        {v.memberPhone ? (
-                          <a
-                            href={`tel:${v.memberPhone}`}
-                            className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                          >
-                            <Phone className="w-3.5 h-3.5" />
-                            Call
-                          </a>
-                        ) : (
-                          <div />
-                        )}
-                        {v.status !== 'Completed' && (
-                          <Button
-                            variant="secondary"
-                            onClick={async () => {
-                              await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellVisits', v.id), {
-                                status: 'Completed',
-                              });
-                              showToast('Visit marked as completed.');
-                            }}
-                            className="h-7 px-2.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
+                      {v.notes && <p className="text-xs text-slate-500 italic">"{v.notes}"</p>}
+
+                      {v.status !== 'Completed' && (
+                        <div className="pt-2 border-t border-slate-100 flex justify-end">
+                          <button
+                            onClick={() => handleMarkVisitCompleted(v)}
+                            className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg border border-emerald-200"
                           >
                             Mark Completed
-                          </Button>
-                        )}
-                      </div>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -2419,123 +2901,87 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── 8. FOLLOW-UPS TAB (Pastoral Follow-up on Members) ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 8: FOLLOW-UPS (Retention & Care for Inactive Members)                   */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'followups' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <Heart className="w-5 h-5 text-rose-600" />
-                    Care & Retention Follow-ups
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Proactive pastoral outreach for absent members, prayer needs, and spiritual check-ins
-                  </p>
+                  <h3 className="text-base font-extrabold text-slate-900">Member Care Follow-ups</h3>
+                  <p className="text-xs text-slate-500">Reach out to absent or inactive believers</p>
                 </div>
                 <Button
-                  onClick={() => {
-                    setFollowupCellId(cells[0]?.id || '');
-                    setFollowupModalOpen(true);
-                  }}
+                  onClick={() => openLogFollowupModal()}
                   className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
                 >
-                  <Plus className="w-4 h-4" />
-                  Log Care Follow-up
+                  <Plus className="w-3.5 h-3.5" />
+                  Log Follow-up
                 </Button>
               </div>
 
-              {filteredFollowups.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 space-y-2">
-                  <Heart className="w-10 h-10 mx-auto text-slate-300" />
-                  <p className="text-xs">No pending care follow-ups.</p>
-                  <Button
-                    onClick={() => {
-                      setFollowupCellId(cells[0]?.id || '');
-                      setFollowupModalOpen(true);
-                    }}
-                    variant="secondary"
-                    className="text-xs"
-                  >
-                    + Log New Follow-up
-                  </Button>
+              {followups.length === 0 ? (
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
+                  No active follow-ups logged. Click "Log Follow-up" to record pastoral outreach.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredFollowups.map((f) => (
-                    <div
-                      key={f.id}
-                      className="p-5 rounded-2xl border border-slate-200 bg-white hover:shadow-md transition-all flex flex-col justify-between"
-                    >
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full">
-                            {f.cellName}
-                          </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              f.status === 'Completed'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {f.status}
-                          </span>
-                        </div>
-
-                        <div>
-                          <h4 className="text-base font-bold text-slate-900">{f.memberName}</h4>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs font-semibold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">
-                              {f.followupType}
-                            </span>
-                            <span className="text-xs text-slate-500 font-medium">· {f.reason}</span>
-                          </div>
-                        </div>
-
-                        {f.notes && (
-                          <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 leading-relaxed">
-                            "{f.notes}"
-                          </p>
-                        )}
+                  {followups.map((f) => (
+                    <div key={f.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded-lg bg-amber-50 text-amber-700 border border-amber-200">
+                          {f.reason}
+                        </span>
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                            f.status === 'Completed'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-amber-50 text-amber-700'
+                          }`}
+                        >
+                          {f.status}
+                        </span>
                       </div>
 
-                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                      <div>
+                        <h4 className="text-xs font-extrabold text-slate-900">{f.memberName}</h4>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                          <Phone className="w-3 h-3 text-slate-400" />
+                          <span>{f.memberPhone || 'No phone'}</span>
+                        </p>
+                      </div>
+
+                      {f.notes && <p className="text-xs text-slate-600 line-clamp-2">"{f.notes}"</p>}
+
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
                           {f.memberPhone && (
-                            <>
-                              <a
-                                href={`tel:${f.memberPhone}`}
-                                className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-1"
-                              >
-                                <Phone className="w-3.5 h-3.5" />
-                                Call
-                              </a>
-                              <a
-                                href={`https://wa.me/${f.memberPhone.replace(/[^0-9]/g, '')}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs font-semibold text-emerald-600 hover:text-emerald-800 flex items-center gap-1"
-                              >
-                                <MessageCircle className="w-3.5 h-3.5" />
-                                WhatsApp
-                              </a>
-                            </>
+                            <a
+                              href={`tel:${f.memberPhone}`}
+                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-lg"
+                            >
+                              Call
+                            </a>
+                          )}
+                          {f.memberPhone && (
+                            <a
+                              href={`https://wa.me/${f.memberPhone.replace(/\D/g, '')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold rounded-lg"
+                            >
+                              WhatsApp
+                            </a>
                           )}
                         </div>
 
                         {f.status !== 'Completed' && (
-                          <Button
-                            variant="secondary"
-                            onClick={async () => {
-                              await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellFollowups', f.id), {
-                                status: 'Completed',
-                              });
-                              showToast('Follow-up marked as completed.');
-                            }}
-                            className="h-7 px-2.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
+                          <button
+                            onClick={() => handleResolveFollowup(f)}
+                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold rounded-lg"
                           >
                             Resolve
-                          </Button>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -2545,137 +2991,84 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── 9. NOTICES & PRAYER TAB (Matching CareCellAnnouncePrayerTab in Mobile) ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* TAB 9: NOTICES & PRAYER REQUESTS                                          */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {activeSubTab === 'announcements' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                    <Megaphone className="w-5 h-5 text-amber-600" />
-                    Cell Notices & Prayer Wall
-                  </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Broadcast study materials, cell announcements, and intercede for member prayer needs
-                  </p>
+            <div className="space-y-6">
+              {/* Segmented Toggle Bar */}
+              <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+                  <button
+                    onClick={() => setAnnouncePrayerSection('prayers')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      announcePrayerSection === 'prayers'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Prayer Petitions ({prayers.length})
+                  </button>
+                  <button
+                    onClick={() => setAnnouncePrayerSection('announcements')}
+                    className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                      announcePrayerSection === 'announcements'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Cell Notices ({notices.length})
+                  </button>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex bg-slate-100 p-1 rounded-xl">
-                    <button
-                      onClick={() => setNoticeSection('prayers')}
-                      className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
-                        noticeSection === 'prayers' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                      }`}
-                    >
-                      Prayer Requests ({prayers.length})
-                    </button>
-                    <button
-                      onClick={() => setNoticeSection('notices')}
-                      className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
-                        noticeSection === 'notices' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                      }`}
-                    >
-                      Cell Notices ({notices.length})
-                    </button>
-                  </div>
-                  {noticeSection === 'prayers' ? (
-                    <Button
-                      onClick={() => {
-                        setPrayerCellId(cells[0]?.id || '');
-                        setPrayerModalOpen(true);
-                      }}
-                      className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1" />
-                      Add Prayer
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={() => {
-                        setNoticeCellId('ALL');
-                        setNoticeModalOpen(true);
-                      }}
-                      className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1" />
-                      Broadcast Notice
-                    </Button>
-                  )}
-                </div>
+
+                <Button
+                  onClick={() =>
+                    announcePrayerSection === 'prayers' ? setPrayerModalOpen(true) : setNoticeModalOpen(true)
+                  }
+                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  {announcePrayerSection === 'prayers' ? 'Add Prayer Request' : 'Broadcast Notice'}
+                </Button>
               </div>
 
-              {noticeSection === 'prayers' ? (
+              {announcePrayerSection === 'prayers' ? (
                 prayers.length === 0 ? (
-                  <div className="py-16 text-center text-slate-400 text-xs">No active cell prayer requests.</div>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
+                    No cell prayer petitions registered. Click "Add Prayer Request" to log a prayer petition.
+                  </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {prayers.map((p) => (
-                      <div key={p.id} className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                      <div key={p.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full">
+                          <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700">
                             {p.category}
                           </span>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                              p.status === 'Answered'
-                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : 'bg-amber-50 text-amber-700 border border-amber-200'
-                            }`}
-                          >
-                            {p.status}
-                          </span>
+                          <span className="text-[10px] text-slate-400">{p.cellName}</span>
                         </div>
-                        <div>
-                          <h4 className="text-sm font-bold text-slate-900">{p.memberName}</h4>
-                          <span className="text-[11px] text-slate-400">{p.cellName}</span>
-                        </div>
-                        <p className="text-xs text-slate-700 italic bg-slate-50 p-3 rounded-xl border border-slate-100">
-                          "{p.request}"
-                        </p>
-                        {p.status !== 'Answered' && (
-                          <div className="pt-2 border-t border-slate-100 flex justify-end">
-                            <Button
-                              variant="secondary"
-                              onClick={async () => {
-                                await updateDoc(doc(db, 'Rhema Church', 'rhema', 'careCellPrayerRequests', p.id), {
-                                  status: 'Answered',
-                                });
-                                showToast('Prayer marked as answered! Praise God.');
-                              }}
-                              className="h-7 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200"
-                            >
-                              <Check className="w-3 h-3 mr-1" />
-                              Praise Report / Answered
-                            </Button>
-                          </div>
-                        )}
+                        <h4 className="text-xs font-bold text-slate-900">{p.memberName}</h4>
+                        <p className="text-xs text-slate-600 line-clamp-3 italic">"{p.request}"</p>
                       </div>
                     ))}
                   </div>
                 )
               ) : notices.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 text-xs">No cell announcements posted.</div>
+                <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs">
+                  No cell announcements broadcasted yet. Click "Broadcast Notice" to create one.
+                </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {notices.map((n) => (
-                    <div key={n.id} className="p-5 rounded-2xl border border-slate-200 bg-white space-y-3">
+                    <div key={n.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
-                          {n.cellName}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            n.priority === 'Urgent'
-                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                              : n.priority === 'High'
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-slate-100 text-slate-600'
-                          }`}
-                        >
+                        <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-700">
                           {n.priority} Priority
                         </span>
+                        <span className="text-[10px] text-slate-400">{n.cellName}</span>
                       </div>
-                      <h4 className="text-base font-bold text-slate-900">{n.title}</h4>
-                      <p className="text-xs text-slate-600 leading-relaxed">{n.message}</p>
+                      <h4 className="text-xs font-bold text-slate-900">{n.title}</h4>
+                      <p className="text-xs text-slate-600 line-clamp-3">{n.message}</p>
                     </div>
                   ))}
                 </div>
@@ -2683,133 +3076,356 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── CREATE / EDIT CARE CELL MODAL (WITH ASSIGNED MEMBERS FIELD & SCROLLABLE CONTAINER) ── */}
-          {modalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
-                {/* Fixed Modal Header */}
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-                      <Building2 className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">
-                        {editingCell ? 'Edit Care Cell' : 'Create Care Cell'}
-                      </h2>
-                      <p className="text-xs text-slate-500">
-                        Fellowship details, leader assignment, and weekly gathering schedule
-                      </p>
-                    </div>
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 1: ADD MEMBERS MODAL (Exact Mobile Parity MemberLookupModal)        */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {showAddMembersModal && addMembersTargetCell && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                {/* Header */}
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-extrabold text-slate-900">
+                      Add Members to {addMembersTargetCell.name}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Select members to assign. Duplicates are strictly blocked.
+                    </p>
                   </div>
                   <button
-                    onClick={() => setModalOpen(false)}
-                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                    onClick={() => setShowAddMembersModal(false)}
+                    className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                {/* Scrollable Form Body */}
-                <form id="careCellForm" onSubmit={handleSaveCell} className="p-6 overflow-y-auto flex-1 space-y-4">
-                  {/* Care Cell Name */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Care Cell Name *
-                    </label>
+                {/* Search Bar */}
+                <div className="p-3 border-b border-slate-100 bg-slate-50/50">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
                       type="text"
-                      required
+                      placeholder="Search by name, phone or locality..."
+                      value={addMembersSearchQuery}
+                      onChange={(e) => setAddMembersSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900"
+                    />
+                    {addMembersSearchQuery && (
+                      <button
+                        onClick={() => setAddMembersSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Location Filter Banner */}
+                {addMembersTargetCell.location && (
+                  <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <MapPin className="w-4 h-4 text-slate-700 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-900 truncate">
+                          Showing members in: {addMembersTargetCell.location}
+                        </p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {addMembersFilterByLocation
+                            ? `Matching saved residential locations (${addMembersFilteredList.length} found)`
+                            : 'Showing all church members regardless of location'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => setAddMembersFilterByLocation(!addMembersFilterByLocation)}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex-shrink-0 ${
+                        addMembersFilterByLocation
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-white text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      {addMembersFilterByLocation ? 'Location: ON' : 'Show All'}
+                    </button>
+                  </div>
+                )}
+
+                {/* Locality Filter Pills Bar */}
+                {uniqueLocalities.length > 0 && (
+                  <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-1.5 overflow-x-auto">
+                    <button
+                      onClick={() => setAddMembersSelectedLocality('ALL')}
+                      className={`px-3 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                        addMembersSelectedLocality === 'ALL'
+                          ? 'bg-slate-900 text-white'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      All Localities
+                    </button>
+                    {uniqueLocalities.map((loc) => (
+                      <button
+                        key={loc}
+                        onClick={() => setAddMembersSelectedLocality(loc)}
+                        className={`px-3 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1 ${
+                          addMembersSelectedLocality === loc
+                            ? 'bg-slate-900 text-white font-bold'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        <MapPin className="w-3 h-3 text-slate-400" />
+                        {loc}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Members List Items */}
+                <div className="p-4 overflow-y-auto space-y-2.5 flex-1">
+                  {addMembersFilteredList.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400 text-xs">
+                      No matching church members found.
+                    </div>
+                  ) : (
+                    addMembersFilteredList.map((m) => {
+                      const isAlreadyInThisCell =
+                        activeMembershipsMap.get(m.id)?.cellId === addMembersTargetCell.id;
+                      const otherMembership = activeMembershipsMap.get(m.id);
+                      const isInOtherCell = otherMembership && otherMembership.cellId !== addMembersTargetCell.id;
+                      const isSelected = addMembersSelectedMap.has(m.id);
+
+                      const initials =
+                        m.name
+                          ?.split(' ')
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((p) => p[0]?.toUpperCase())
+                          .join('') || 'M';
+
+                      return (
+                        <div
+                          key={m.id}
+                          onClick={() => !isAlreadyInThisCell && handleToggleAddMember(m)}
+                          className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                            isAlreadyInThisCell
+                              ? 'bg-slate-50/70 border-slate-200 opacity-60 cursor-not-allowed'
+                              : isSelected
+                              ? 'bg-emerald-50/40 border-emerald-500 shadow-sm cursor-pointer'
+                              : 'bg-white border-slate-200 hover:border-slate-300 cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            {/* Avatar */}
+                            {m.photoUrl ? (
+                              <img
+                                src={m.photoUrl}
+                                alt={m.name}
+                                className="w-10 h-10 rounded-full object-cover border border-slate-200 flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 text-slate-700 font-bold flex items-center justify-center text-xs flex-shrink-0">
+                                {initials}
+                              </div>
+                            )}
+
+                            {/* Member Details */}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-extrabold text-slate-900 truncate">{m.name}</span>
+                                {m.memberCode && (
+                                  <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 border border-slate-200 px-1.5 py-0.2 rounded">
+                                    {m.memberCode}
+                                  </span>
+                                )}
+                              </div>
+
+                              {m.phone && (
+                                <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
+                                  <Phone className="w-3 h-3 text-slate-400" />
+                                  <span>{m.phone}</span>
+                                </p>
+                              )}
+
+                              {m.locality && (
+                                <p className="text-[11px] text-slate-600 flex items-center gap-1 mt-0.5">
+                                  <MapPin className="w-3 h-3 text-slate-400" />
+                                  <span>{m.locality}</span>
+                                </p>
+                              )}
+
+                              {/* Status Badges */}
+                              {isAlreadyInThisCell ? (
+                                <div className="mt-1 flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+                                  <UserCheck className="w-3 h-3 text-emerald-600" />
+                                  Already in this Cell
+                                </div>
+                              ) : isInOtherCell ? (
+                                <div className="mt-1 flex items-center gap-1 text-[10px] font-bold text-amber-700">
+                                  <AlertCircle className="w-3 h-3 text-amber-600" />
+                                  In {otherMembership.cellCode || otherMembership.cellName || 'Other Cell'}
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          {/* Checkbox */}
+                          <div
+                            className={`w-5 h-5 rounded-lg border flex items-center justify-center transition-colors flex-shrink-0 ${
+                              isAlreadyInThisCell
+                                ? 'bg-slate-200 border-slate-300'
+                                : isSelected
+                                ? 'bg-slate-900 border-slate-900 text-white'
+                                : 'border-slate-300 bg-white'
+                            }`}
+                          >
+                            {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Sticky Bottom Action Footer */}
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between gap-3">
+                  <span className="text-xs font-bold text-slate-700">
+                    {addMembersSelectedMap.size} members selected
+                  </span>
+
+                  <Button
+                    onClick={handleConfirmAddMembers}
+                    disabled={addMembersSelectedMap.size === 0 || addMembersSaving}
+                    className={`rounded-xl text-xs font-bold px-5 py-2 shadow transition-all ${
+                      addMembersSelectedMap.size > 0
+                        ? 'bg-slate-900 hover:bg-slate-800 text-white'
+                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                  >
+                    {addMembersSaving ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      'Assign Selected'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 2: CREATE / EDIT CARE CELL MODAL (CareCellFormModal)                */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {modalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                {/* Header */}
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
+                      <Building2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900">
+                        {editingCell ? 'Edit Care Cell' : 'Create Care Cell'}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        Fellowship details, leader assignment, and weekly gathering schedule
+                      </p>
+                    </div>
+                  </div>
+                  <button onClick={() => setModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700 rounded-lg">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Form Body */}
+                <form id="care-cell-form" onSubmit={handleSaveCell} className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                  {/* Name */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell Name *</label>
+                    <input
+                      type="text"
                       placeholder="e.g. Grace Fellowship / Hitech City Cell"
                       value={formName}
                       onChange={(e) => setFormName(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                     />
                   </div>
 
-                  {/* Care Cell Code with Auto Generate Button (Matching Mobile) */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                        Care Cell Code *
-                      </label>
+                  {/* Code */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center">
+                      <label className="text-xs font-bold text-slate-700">Care Cell Code *</label>
                       <button
                         type="button"
-                        onClick={() => setFormCellCode(generateAutoCellCode())}
-                        className="text-xs font-bold text-blue-600 hover:text-blue-700"
+                        onClick={() => {
+                          const nextNum = cells.length + 1;
+                          setFormCellCode(`Rhema_CareCell-${String(nextNum).padStart(3, '0')}`);
+                        }}
+                        className="text-[11px] font-bold text-emerald-700 hover:underline flex items-center gap-1"
                       >
-                        Auto Generate
+                        <Sparkles className="w-3 h-3" /> Auto Generate
                       </button>
                     </div>
                     <input
                       type="text"
-                      required
                       placeholder="Rhema_CareCell-001"
                       value={formCellCode}
                       onChange={(e) => setFormCellCode(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm font-mono border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      required
+                      className="w-full px-3 py-2 text-xs font-mono border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                     />
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Standard format: Rhema_CareCell-001, Rhema_CareCell-002
-                    </p>
+                    <p className="text-[10px] text-slate-400">Standard format: Rhema_CareCell-001, Rhema_CareCell-002</p>
                   </div>
 
                   {/* Description */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Description
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Description</label>
                     <textarea
-                      rows={2}
                       placeholder="Focus of this cell (e.g. Young Adults, Family Bible Study, Neighborhood Care)"
                       value={formDescription}
                       onChange={(e) => setFormDescription(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      rows={2}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                     />
                   </div>
 
                   {/* Location / Area */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Location / Area
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Location / Area</label>
                     <input
                       type="text"
-                      placeholder="e.g. Madhapur, Kondapur, Jubilee Hills"
+                      placeholder="e.g. Madhapur, Kondapur, Jubilee Hills, Koilakuntla"
                       value={formLocation}
                       onChange={(e) => setFormLocation(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                     />
                   </div>
 
-                  {/* Cell Leader (Existing Church Member) * (Matching Mobile Lookup Card) */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Cell Leader (Existing Church Member) *
-                    </label>
+                  {/* Leader Selection */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Cell Leader (Existing Church Member) *</label>
                     {formLeaderName ? (
                       <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 font-bold text-sm flex items-center justify-center">
-                            {formLeaderName
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .slice(0, 2)
-                              .toUpperCase()}
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-800 font-bold flex items-center justify-center text-xs">
+                            {formLeaderName.slice(0, 1)}
                           </div>
                           <div>
-                            <span className="text-sm font-bold text-slate-900 block">{formLeaderName}</span>
-                            <span className="text-xs text-slate-500 block">{formLeaderPhone || 'No phone'}</span>
+                            <p className="text-xs font-bold text-slate-900">{formLeaderName}</p>
+                            <p className="text-[11px] text-slate-500">{formLeaderPhone || 'No phone'}</p>
                           </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => {
-                            setLeaderSearchQuery('');
-                            setShowLeaderPicker(true);
+                            setSingleLookupMode('leader');
+                            setSingleLookupSearch('');
                           }}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-700 px-2.5 py-1 rounded-lg hover:bg-blue-50"
+                          className="text-xs text-slate-700 font-bold hover:underline"
                         >
                           Change
                         </button>
@@ -2818,36 +3434,29 @@ export default function CareCellsAdminPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setLeaderSearchQuery('');
-                          setShowLeaderPicker(true);
+                          setSingleLookupMode('leader');
+                          setSingleLookupSearch('');
                         }}
-                        className="w-full py-2.5 px-3 border border-dashed border-slate-300 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-2"
+                        className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2 transition-colors"
                       >
-                        <User className="w-4 h-4 text-slate-400" />
+                        <UserPlus className="w-4 h-4 text-slate-500" />
                         Select Cell Leader from Members
                       </button>
                     )}
                   </div>
 
-                  {/* Assistant Leader (Optional) (Matching Mobile Lookup Card) */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Assistant Leader (Optional)
-                    </label>
+                  {/* Assistant Leader Selection */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Assistant Leader (Optional)</label>
                     {formAssistantName ? (
                       <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-purple-100 text-purple-700 font-bold text-xs flex items-center justify-center">
-                            {formAssistantName
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .slice(0, 2)
-                              .toUpperCase()}
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-800 font-bold flex items-center justify-center text-xs">
+                            {formAssistantName.slice(0, 1)}
                           </div>
                           <div>
-                            <span className="text-sm font-semibold text-slate-900 block">{formAssistantName}</span>
-                            <span className="text-xs text-slate-500 block">{formAssistantPhone || 'No phone'}</span>
+                            <p className="text-xs font-bold text-slate-900">{formAssistantName}</p>
+                            <p className="text-[11px] text-slate-500">{formAssistantPhone || 'No phone'}</p>
                           </div>
                         </div>
                         <button
@@ -2858,7 +3467,7 @@ export default function CareCellsAdminPage() {
                             setFormAssistantPhone('');
                             setFormAssistantPhoto(undefined);
                           }}
-                          className="text-xs font-bold text-rose-600 hover:text-rose-700 px-2.5 py-1 rounded-lg hover:bg-rose-50"
+                          className="text-xs text-rose-600 font-bold hover:underline"
                         >
                           Remove
                         </button>
@@ -2867,459 +3476,333 @@ export default function CareCellsAdminPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setLeaderSearchQuery('');
-                          setShowAssistantPicker(true);
+                          setSingleLookupMode('assistant');
+                          setSingleLookupSearch('');
                         }}
-                        className="w-full py-2 px-3 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-50 flex items-center justify-center gap-2"
+                        className="w-full py-2.5 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-2 transition-colors"
                       >
-                        <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                        <UserPlus className="w-4 h-4 text-slate-500" />
                         Assign Assistant Leader
                       </button>
                     )}
                   </div>
 
-                  {/* ── ASSIGNED MEMBERS SECTION (Exact Mobile Parity: CareCellFormModal.tsx lines 585-700) ── */}
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                  {/* Location-Based Assigned Members Section */}
+                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <MapPin className="w-4 h-4 text-blue-600 shrink-0" />
-                        <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                          Assigned Members {formLocation.trim() ? `(${formLocation.trim()})` : ''}
+                      <div className="flex items-center gap-1.5">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                        <span className="text-xs font-bold text-slate-900">
+                          Assigned Members {formLocation ? `(${formLocation})` : ''}
                         </span>
                       </div>
-                      {locationMatchedMembers.length > 0 && (
+                      {formLocationMatchedMembers.length > 0 && (
                         <button
                           type="button"
-                          onClick={toggleAllMatchedMembers}
-                          className="text-xs font-bold text-blue-600 hover:text-blue-700 px-2 py-0.5 rounded hover:bg-blue-50 transition-colors"
+                          onClick={() => {
+                            if (formSelectedMembersMap.size === formLocationMatchedMembers.length) {
+                              setFormSelectedMembersMap(new Map());
+                            } else {
+                              const map = new Map<string, ChurchMemberOption>();
+                              formLocationMatchedMembers.forEach((m) => map.set(m.id, m));
+                              setFormSelectedMembersMap(map);
+                            }
+                          }}
+                          className="text-[11px] font-bold text-slate-700 hover:underline"
                         >
-                          {isAllMatchedSelected ? 'Deselect All' : 'Select All'}
+                          {formSelectedMembersMap.size === formLocationMatchedMembers.length ? 'Deselect' : 'Select All'}
                         </button>
                       )}
                     </div>
 
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      {formLocation.trim()
-                        ? `Existing church members living within ${formLocation.trim()} based on saved profile locations.`
-                        : 'Enter a Location / Area above to match members living in that locality, or browse the church directory below.'}
+                    <p className="text-[11px] text-slate-500 leading-tight">
+                      {formLocation
+                        ? `Existing church members living within ${formLocation} based on saved residential locations.`
+                        : 'Enter a Location / Area above to match members living in that locality.'}
                     </p>
 
-                    {/* Location Matched Members List */}
-                    {formLocation.trim().length >= 2 && (
-                      <div className="space-y-1.5 pt-1">
-                        {locationMatchedMembers.length === 0 ? (
-                          <div className="p-3 bg-white border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-500">
-                            <AlertCircle className="w-4 h-4 text-slate-400 shrink-0" />
-                            <span>No members currently saved with residential address in "{formLocation}".</span>
-                          </div>
-                        ) : (
-                          <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
-                            {locationMatchedMembers.map((mem) => {
-                              const isSel = selectedMembersMap.has(mem.id);
-                              return (
-                                <div
-                                  key={mem.id}
-                                  onClick={() => toggleMemberSelection(mem)}
-                                  className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                                    isSel
-                                      ? 'bg-blue-50/70 border-blue-300 shadow-xs'
-                                      : 'bg-white border-slate-200 hover:border-slate-300'
-                                  }`}
-                                >
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <div
-                                      className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
-                                        isSel
-                                          ? 'bg-blue-600 border-blue-600 text-white'
-                                          : 'border-slate-300 bg-white'
-                                      }`}
-                                    >
-                                      {isSel && <Check className="w-3 h-3 stroke-[3]" />}
-                                    </div>
-                                    <div className="min-w-0">
-                                      <span className="text-xs font-bold text-slate-900 block truncate">
-                                        {mem.name}
-                                      </span>
-                                      <div className="flex items-center gap-2 mt-0.5">
-                                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
-                                          <MapPin className="w-2.5 h-2.5 text-slate-500" />
-                                          {mem.locality || formLocation}
-                                        </span>
-                                        {mem.phone && (
-                                          <span className="text-[10px] text-slate-500">{mem.phone}</span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Open Church Directory Lookup Button */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMemberDirectorySearch('');
-                        setShowAllMembersPicker(true);
-                      }}
-                      className="w-full py-2.5 px-3 bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 rounded-xl text-xs font-bold text-slate-700 flex items-center justify-center gap-2 transition-all shadow-xs"
-                    >
-                      <UserPlus className="w-4 h-4 text-blue-600" />
-                      <span>
-                        {formLocation.trim()
-                          ? `Browse / Filter Members in ${formLocation.trim()} (${selectedMembersMap.size} selected)`
-                          : `Select Members from Church Directory (${selectedMembersMap.size} selected)`}
-                      </span>
-                    </button>
-
-                    {/* Selected Members Chips */}
-                    {selectedMembersMap.size > 0 && (
-                      <div className="pt-2 border-t border-slate-200/60">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-                          Enrolled Cell Members ({selectedMembersMap.size})
-                        </span>
-                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
-                          {Array.from(selectedMembersMap.values()).map((mem) => (
-                            <span
-                              key={mem.id}
-                              className="inline-flex items-center gap-1 bg-white border border-slate-200 text-slate-800 text-[11px] font-semibold px-2 py-0.5 rounded-lg shadow-2xs"
-                            >
-                              <span>{mem.name}</span>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  removeSelectedMember(mem.id);
-                                }}
-                                className="text-slate-400 hover:text-rose-600 ml-0.5"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Meeting Day * (Matching Mobile Day Pill Selector) */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Meeting Day *
-                    </label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {DAYS_OF_WEEK.map((day) => {
-                        const isSel = formMeetingDay === day;
-                        return (
-                          <button
-                            key={day}
-                            type="button"
-                            onClick={() => setFormMeetingDay(day)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                              isSel ? 'bg-slate-900 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                            }`}
-                          >
-                            {day}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Starting Time * & Ending Time */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Starting Time *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="19:00"
-                        value={formMeetingTime}
-                        onChange={(e) => setFormMeetingTime(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      />
-                      <span className="text-[11px] text-slate-400 mt-1 block">
-                        {formatTimeDisplay(formMeetingTime)} (24h format e.g. 19:00)
-                      </span>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Ending Time
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="20:30"
-                        value={formMeetingEndTime}
-                        onChange={(e) => setFormMeetingEndTime(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      />
-                      <span className="text-[11px] text-slate-400 mt-1 block">
-                        {formatTimeDisplay(formMeetingEndTime)} (24h format e.g. 20:30)
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Meeting Location / Address */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Meeting Location / Address
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Leader's Home / Community Hall"
-                      value={formMeetingLocation}
-                      onChange={(e) => setFormMeetingLocation(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-
-                  {/* Max Members & Status Pills (Matching Mobile) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Max Members
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="200"
-                        value={formMaxMembers}
-                        onChange={(e) => setFormMaxMembers(e.target.value)}
-                        className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                        Status
-                      </label>
-                      <div className="flex gap-1.5">
-                        {STATUS_OPTIONS.map((st) => {
-                          const isSel = formStatus === st;
+                    {formLocationMatchedMembers.length > 0 && (
+                      <div className="max-h-36 overflow-y-auto divide-y divide-slate-100 bg-white rounded-xl border border-slate-200">
+                        {formLocationMatchedMembers.map((mem) => {
+                          const isChecked = formSelectedMembersMap.has(mem.id);
                           return (
-                            <button
-                              key={st}
-                              type="button"
-                              onClick={() => setFormStatus(st)}
-                              className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
-                                isSel
-                                  ? st === 'Active'
-                                    ? 'bg-emerald-600 text-white'
-                                    : st === 'Inactive'
-                                    ? 'bg-amber-600 text-white'
-                                    : 'bg-rose-600 text-white'
-                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                              }`}
+                            <div
+                              key={mem.id}
+                              onClick={() => {
+                                setFormSelectedMembersMap((prev) => {
+                                  const next = new Map(prev);
+                                  if (next.has(mem.id)) next.delete(mem.id);
+                                  else next.set(mem.id, mem);
+                                  return next;
+                                });
+                              }}
+                              className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50 cursor-pointer text-xs"
                             >
-                              {st}
-                            </button>
+                              <div>
+                                <p className="font-bold text-slate-900">{mem.name}</p>
+                                <p className="text-[10px] text-slate-400">{mem.phone || mem.locality}</p>
+                              </div>
+                              <div
+                                className={`w-4 h-4 rounded border flex items-center justify-center ${
+                                  isChecked ? 'bg-slate-900 border-slate-900 text-white' : 'border-slate-300'
+                                }`}
+                              >
+                                {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                              </div>
+                            </div>
                           );
                         })}
                       </div>
-                    </div>
+                    )}
                   </div>
-                </form>
 
-                {/* Fixed Modal Footer */}
-                <div className="p-4 border-t border-slate-100 flex items-center justify-between shrink-0 bg-slate-50">
-                  {editingCell ? (
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteCell(editingCell)}
-                      className="text-xs font-bold text-rose-600 hover:text-rose-700 px-3 py-2 rounded-xl hover:bg-rose-50 flex items-center gap-1.5 transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete Care Cell
-                    </button>
-                  ) : (
-                    <div />
-                  )}
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setModalOpen(false)}
-                      disabled={saving}
-                      className="text-xs"
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      form="careCellForm"
-                      disabled={saving}
-                      className="bg-black hover:bg-slate-900 text-white text-xs font-bold min-w-[130px]"
-                    >
-                      {saving ? (
-                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                      ) : editingCell ? (
-                        'Save Changes'
-                      ) : (
-                        'Create Care Cell'
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── SCHEDULE MEETING MODAL (DIRECT ACTION 2 - Exact Mobile Parity: MeetingFormModal.tsx) ── */}
-          {meetingModalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-                      <CalendarPlus className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-base font-bold text-slate-900">
-                        {editingMeeting ? 'Edit Care Cell Meeting' : 'Schedule Care Cell Meeting'}
-                      </h2>
-                      <p className="text-xs text-slate-500">Plan weekly gathering, Bible study, and prayer topic</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setMeetingModalOpen(false)}
-                    className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <form id="meetingForm" onSubmit={handleSaveMeeting} className="p-6 overflow-y-auto flex-1 space-y-4">
-                  {/* Select Cell */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Care Cell *
-                    </label>
-                    <select
-                      value={meetingCellId}
-                      onChange={(e) => {
-                        const cid = e.target.value;
-                        setMeetingCellId(cid);
-                        const c = cells.find((item) => item.id === cid);
-                        if (c) {
-                          setMeetingTitle(`${c.name} Fellowship`);
-                          setMeetingLocation(c.meetingLocation || c.location);
-                          setMeetingStartTime(c.meetingTime || '19:00');
-                          setMeetingEndTime(c.meetingEndTime || '20:30');
-                        }
-                      }}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    >
-                      {cells.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} ({c.cellCode}) · {c.location}
-                        </option>
+                  {/* Meeting Day Chips */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Meeting Day *</label>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                      {DAYS_OF_WEEK.map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => setFormMeetingDay(d)}
+                          className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                            formMeetingDay === d
+                              ? 'bg-slate-900 text-white'
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                        >
+                          {d.slice(0, 3)}
+                        </button>
                       ))}
-                    </select>
+                    </div>
                   </div>
 
-                  {/* Meeting Title */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Meeting Title *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. Weekly Fellowship & Bible Study"
-                      value={meetingTitle}
-                      onChange={(e) => setMeetingTitle(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-
-                  {/* Scripture Focus & Study Topic */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Scripture / Study Focus
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Philippians 4:6-7 / Overcoming Worry"
-                      value={meetingScripture}
-                      onChange={(e) => setMeetingScripture(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                  </div>
-
-                  {/* Date, Start Time, End Time */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Meeting Date *
-                      </label>
+                  {/* Times (2 Columns) */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Starting Time *</label>
                       <input
-                        type="date"
+                        type="time"
+                        value={formMeetingTime}
+                        onChange={(e) => setFormMeetingTime(e.target.value)}
                         required
-                        value={meetingDate}
-                        onChange={(e) => setMeetingDate(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Start Time
-                      </label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Ending Time</label>
                       <input
-                        type="text"
-                        value={meetingStartTime}
-                        onChange={(e) => setMeetingStartTime(e.target.value)}
-                        placeholder="19:00"
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        End Time
-                      </label>
-                      <input
-                        type="text"
-                        value={meetingEndTime}
-                        onChange={(e) => setMeetingEndTime(e.target.value)}
-                        placeholder="20:30"
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        type="time"
+                        value={formMeetingEndTime}
+                        onChange={(e) => setFormMeetingEndTime(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                       />
                     </div>
                   </div>
 
                   {/* Meeting Location */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Venue / Meeting Location
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Meeting Location / Address</label>
                     <input
                       type="text"
-                      value={meetingLocation}
-                      onChange={(e) => setMeetingLocation(e.target.value)}
-                      placeholder="e.g. Leader's Residence / Community Center"
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      placeholder="e.g. Leader's Home / Community Hall / Flat 302"
+                      value={formMeetingLocation}
+                      onChange={(e) => setFormMeetingLocation(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                     />
                   </div>
 
-                  {/* Meeting Type */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Meeting Type
-                    </label>
-                    <div className="flex flex-wrap gap-1.5">
+                  {/* Capacity & Status */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Max Capacity</label>
+                      <input
+                        type="number"
+                        min="5"
+                        max="100"
+                        value={formMaxMembers}
+                        onChange={(e) => setFormMaxMembers(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Status</label>
+                      <select
+                        value={formStatus}
+                        onChange={(e: any) => setFormStatus(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                      >
+                        {STATUS_OPTIONS.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </form>
+
+                {/* Footer Actions */}
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setModalOpen(false)}
+                    className="rounded-xl text-xs font-bold"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    form="care-cell-form"
+                    type="submit"
+                    disabled={savingCell}
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold px-5"
+                  >
+                    {savingCell ? <Loader2 className="w-4 h-4 animate-spin" /> : editingCell ? 'Save Changes' : 'Create Care Cell'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* SUB-MODAL: SINGLE MEMBER LOOKUP (FOR LEADER OR ASSISTANT)                 */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {singleLookupMode && (
+            <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/70 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <h4 className="text-sm font-extrabold text-slate-900">
+                    Select {singleLookupMode === 'leader' ? 'Cell Leader' : 'Assistant Leader'}
+                  </h4>
+                  <button onClick={() => setSingleLookupMode(null)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="p-3 border-b border-slate-100 bg-slate-50">
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search member name or phone..."
+                      value={singleLookupSearch}
+                      onChange={(e) => setSingleLookupSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-3 overflow-y-auto space-y-1.5 flex-1 divide-y divide-slate-100">
+                  {membersPool
+                    .filter((m) => {
+                      if (!singleLookupSearch.trim()) return true;
+                      const q = singleLookupSearch.toLowerCase();
+                      return m.name.toLowerCase().includes(q) || (m.phone && m.phone.includes(q));
+                    })
+                    .map((m) => (
+                      <div
+                        key={m.id}
+                        onClick={() => {
+                          if (singleLookupMode === 'leader') {
+                            setFormLeaderId(m.id);
+                            setFormLeaderName(m.name);
+                            setFormLeaderPhone(m.phone || '');
+                            setFormLeaderPhoto(m.photoUrl);
+                          } else {
+                            setFormAssistantId(m.id);
+                            setFormAssistantName(m.name);
+                            setFormAssistantPhone(m.phone || '');
+                            setFormAssistantPhoto(m.photoUrl);
+                          }
+                          setSingleLookupMode(null);
+                        }}
+                        className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50 rounded-xl cursor-pointer"
+                      >
+                        <div>
+                          <p className="text-xs font-extrabold text-slate-900">{m.name}</p>
+                          <p className="text-[11px] text-slate-500">{m.phone || m.locality}</p>
+                        </div>
+                        <span className="text-xs font-bold text-slate-700">Select</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 3: SCHEDULE / EDIT MEETING MODAL (MeetingFormModal)                  */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {meetingModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
+                {/* Header */}
+                <div className="p-4 sm:p-5 border-b border-slate-100 flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2.5 bg-emerald-50 text-emerald-700 rounded-xl border border-emerald-100">
+                      <CalendarPlus className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900">
+                        {editingMeeting ? 'Edit Meeting' : 'Schedule Fellowship Meeting'}
+                      </h3>
+                      <p className="text-xs text-slate-500">Plan a gathering with Scripture and attendance roll-call</p>
+                    </div>
+                  </div>
+                  <button onClick={() => setMeetingModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Form Body */}
+                <form id="meeting-form" onSubmit={handleSaveMeeting} className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+                  {/* Care Cell */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
+                    <select
+                      value={meetingCellId}
+                      onChange={(e) => {
+                        setMeetingCellId(e.target.value);
+                        const c = cells.find((cell) => cell.id === e.target.value);
+                        if (c) setMeetingLocation(c.meetingLocation || c.location || '');
+                      }}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none bg-white"
+                    >
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Title */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Meeting Title *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Weekly Fellowship & Prayer / Walking in Faith"
+                      value={meetingTitle}
+                      onChange={(e) => setMeetingTitle(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Meeting Type Chips */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Meeting Type</label>
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
                       {MEETING_TYPES.map((t) => (
                         <button
                           key={t}
                           type="button"
                           onClick={() => setMeetingType(t)}
-                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                          className={`px-3 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
                             meetingType === t
-                              ? 'bg-slate-900 text-white shadow-xs'
+                              ? 'bg-slate-900 text-white'
                               : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                           }`}
                         >
@@ -3329,96 +3812,246 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  {/* Notes / Description */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Pastoral Notes / Instructions
-                    </label>
+                  {/* Date & Time Row */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Date *</label>
+                      <input
+                        type="date"
+                        value={meetingDate}
+                        onChange={(e) => setMeetingDate(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Start Time *</label>
+                      <input
+                        type="time"
+                        value={meetingStartTime}
+                        onChange={(e) => setMeetingStartTime(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">End Time</label>
+                      <input
+                        type="time"
+                        value={meetingEndTime}
+                        onChange={(e) => setMeetingEndTime(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Location */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Location / Venue</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Leader's Home / Community Hall"
+                      value={meetingLocation}
+                      onChange={(e) => setMeetingLocation(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
+                    />
+                  </div>
+
+                  {/* Holy Scripture Reading Section */}
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="w-4 h-4 text-slate-900" />
+                        <span className="text-xs font-bold text-slate-900">Holy Scripture Reading</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fetchScripture(selectedBookIndex, selectedChapter, selectedVerseRange)}
+                        className="text-[11px] font-bold text-slate-700 hover:underline flex items-center gap-1"
+                      >
+                        <Sparkles className="w-3 h-3 text-slate-500" /> Reload Verse
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Book</label>
+                        <select
+                          value={selectedBookIndex}
+                          onChange={(e) => {
+                            const idx = Number(e.target.value);
+                            setSelectedBookIndex(idx);
+                            setSelectedChapter(1);
+                            fetchScripture(idx, 1, selectedVerseRange);
+                          }}
+                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-xl"
+                        >
+                          {ENGLISH_NAMES.map((name, idx) => (
+                            <option key={name} value={idx}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Chapter</label>
+                        <select
+                          value={selectedChapter}
+                          onChange={(e) => {
+                            const ch = Number(e.target.value);
+                            setSelectedChapter(ch);
+                            fetchScripture(selectedBookIndex, ch, selectedVerseRange);
+                          }}
+                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-xl"
+                        >
+                          {Array.from({ length: getChapterCount(selectedBookIndex) || 1 }, (_, i) => i + 1).map((ch) => (
+                            <option key={ch} value={ch}>
+                              {ch}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Verse(s)</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 6-7"
+                          value={selectedVerseRange}
+                          onChange={(e) => {
+                            setSelectedVerseRange(e.target.value);
+                            fetchScripture(selectedBookIndex, selectedChapter, e.target.value);
+                          }}
+                          className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200 rounded-xl"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Scripture Preview Card */}
+                    <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-1.5 text-xs">
+                      <p className="font-bold text-slate-900">
+                        {ENGLISH_NAMES[selectedBookIndex]} {selectedChapter}:{selectedVerseRange} ·{' '}
+                        {TELUGU_NAMES[selectedBookIndex]} {selectedChapter}:{selectedVerseRange}
+                      </p>
+                      {loadingScripture ? (
+                        <div className="py-2 text-center text-slate-400 text-xs">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" />
+                        </div>
+                      ) : (
+                        <>
+                          {scriptureTextEn && (
+                            <div>
+                              <span className="text-[10px] font-extrabold text-slate-400 block">ENGLISH</span>
+                              <p className="text-slate-700 italic">"{scriptureTextEn}"</p>
+                            </div>
+                          )}
+                          {scriptureTextTe && (
+                            <div className="pt-1">
+                              <span className="text-[10px] font-extrabold text-emerald-700 block">
+                                TELUGU (పరిశుద్ధ గ్రంథం)
+                              </span>
+                              <p className="text-emerald-950 font-medium">"{scriptureTextTe}"</p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Notes / Agenda</label>
                     <textarea
-                      rows={2}
-                      placeholder="Special prayer focus, guest speaker notes, or directions..."
+                      placeholder="Special prayer petitions, guest speaker details, or worship focus..."
                       value={meetingDescription}
                       onChange={(e) => setMeetingDescription(e.target.value)}
-                      className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      rows={2}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none"
                     />
+                  </div>
+
+                  {/* Status */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Status</label>
+                    <select
+                      value={meetingStatus}
+                      onChange={(e: any) => setMeetingStatus(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none bg-white"
+                    >
+                      <option value="Upcoming">Upcoming</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Cancelled">Cancelled</option>
+                    </select>
                   </div>
                 </form>
 
-                <div className="p-4 border-t border-slate-100 flex items-center justify-end gap-2 shrink-0 bg-slate-50">
+                {/* Footer Actions */}
+                <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end gap-3">
                   <Button
                     type="button"
-                    variant="secondary"
+                    variant="outline"
                     onClick={() => setMeetingModalOpen(false)}
-                    disabled={savingMeeting}
-                    className="text-xs"
+                    className="rounded-xl text-xs font-bold"
                   >
                     Cancel
                   </Button>
                   <Button
+                    form="meeting-form"
                     type="submit"
-                    form="meetingForm"
                     disabled={savingMeeting}
-                    className="bg-black hover:bg-slate-900 text-white text-xs font-bold min-w-[140px]"
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold px-5"
                   >
-                    {savingMeeting ? (
-                      <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                    ) : editingMeeting ? (
-                      'Save Changes'
-                    ) : (
-                      'Schedule Meeting'
-                    )}
+                    {savingMeeting ? <Loader2 className="w-4 h-4 animate-spin" /> : editingMeeting ? 'Save Changes' : 'Schedule Meeting'}
                   </Button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── TRANSFER MEMBER SUB-MODAL ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 4: TRANSFER MEMBER MODAL                                            */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {transferModalOpen && memberToTransfer && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <ArrowRightLeft className="w-4 h-4 text-blue-600" />
-                    <h3 className="text-sm font-bold text-slate-900">Transfer Cell Member</h3>
-                  </div>
-                  <button onClick={() => setTransferModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Transfer Care Cell Member</h3>
+                  <button onClick={() => setTransferModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <p className="text-xs text-slate-600">
-                  Transfer <strong className="text-slate-900">{memberToTransfer.memberName}</strong> from{' '}
-                  <span className="font-semibold">{memberToTransfer.cellName}</span> to another care cell:
-                </p>
+                <div className="p-3 bg-slate-50 rounded-xl space-y-1 text-xs">
+                  <p className="font-bold text-slate-900">{memberToTransfer.memberName}</p>
+                  <p className="text-slate-500">Currently in: {memberToTransfer.cellName} ({memberToTransfer.cellCode})</p>
+                </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Select Target Care Cell
-                  </label>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700">Target Care Cell</label>
                   <select
                     value={transferTargetCellId}
                     onChange={(e) => setTransferTargetCellId(e.target.value)}
-                    className="w-full px-3.5 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:ring-2 focus:ring-slate-900 focus:outline-none bg-white"
                   >
                     {cells
                       .filter((c) => c.id !== memberToTransfer.cellId)
                       .map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.cellCode}) · {c.location}
+                          {c.cellCode} — {c.name}
                         </option>
                       ))}
                   </select>
                 </div>
 
-                <div className="pt-2 flex items-center justify-end gap-2">
-                  <Button variant="secondary" onClick={() => setTransferModalOpen(false)} className="text-xs">
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <Button variant="outline" onClick={() => setTransferModalOpen(false)} className="rounded-xl text-xs font-bold">
                     Cancel
                   </Button>
                   <Button
-                    onClick={handleTransferMember}
-                    disabled={transferring}
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold"
+                    onClick={handleConfirmTransfer}
+                    disabled={transferring || !transferTargetCellId}
+                    className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold"
                   >
                     {transferring ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Confirm Transfer'}
                   </Button>
@@ -3427,103 +4060,74 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── SCHEDULE VISIT SUB-MODAL ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 5: SCHEDULE PASTORAL VISIT MODAL                                    */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {visitModalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
-                  <div className="flex items-center gap-2">
-                    <Home className="w-5 h-5 text-indigo-600" />
-                    <h3 className="text-sm font-bold text-slate-900">Schedule Pastoral Care Visit</h3>
-                  </div>
-                  <button onClick={() => setVisitModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Schedule Pastoral Visit</h3>
+                  <button onClick={() => setVisitModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <form onSubmit={handleSaveVisit} className="p-6 overflow-y-auto flex-1 space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Care Cell
-                    </label>
+                <form onSubmit={handleSaveVisit} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
                     <select
                       value={visitCellId}
                       onChange={(e) => setVisitCellId(e.target.value)}
+                      required
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
                     >
                       {cells.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.cellCode})
+                          {c.cellCode} — {c.name}
                         </option>
                       ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Member Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. John Doe"
-                      value={visitMemberName}
-                      onChange={(e) => setVisitMemberName(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Phone Number
-                      </label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Member Name *</label>
                       <input
                         type="text"
+                        placeholder="e.g. Sakibanda Sunil Babu"
+                        value={visitMemberName}
+                        onChange={(e) => setVisitMemberName(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Phone</label>
+                      <input
+                        type="tel"
                         placeholder="+91..."
                         value={visitMemberPhone}
                         onChange={(e) => setVisitMemberPhone(e.target.value)}
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Purpose
-                      </label>
-                      <select
-                        value={visitPurpose}
-                        onChange={(e) => setVisitPurpose(e.target.value)}
-                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                      >
-                        {VISIT_PURPOSES.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Visit Date *
-                      </label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Date</label>
                       <input
                         type="date"
-                        required
                         value={visitDate}
                         onChange={(e) => setVisitDate(e.target.value)}
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Visit Time
-                      </label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Time</label>
                       <input
-                        type="text"
-                        placeholder="18:00"
+                        type="time"
                         value={visitTime}
                         onChange={(e) => setVisitTime(e.target.value)}
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
@@ -3531,49 +4135,37 @@ export default function CareCellsAdminPage() {
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Home Address / Venue
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Visit Purpose</label>
+                    <select
+                      value={visitPurpose}
+                      onChange={(e) => setVisitPurpose(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      {VISIT_PURPOSES.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Address / Hospital</label>
                     <input
                       type="text"
-                      placeholder="e.g. Flat 302, Green Valley Apartments"
+                      placeholder="e.g. Home address or hospital ward"
                       value={visitLocation}
                       onChange={(e) => setVisitLocation(e.target.value)}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Assigned Pastoral Visitors
-                    </label>
-                    <input
-                      type="text"
-                      value={visitAssignedVisitors}
-                      onChange={(e) => setVisitAssignedVisitors(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Notes / Prayer Points
-                    </label>
-                    <textarea
-                      rows={2}
-                      placeholder="Special prayer requests or context for the visit..."
-                      value={visitNotes}
-                      onChange={(e) => setVisitNotes(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="pt-2 flex justify-end gap-2">
-                    <Button variant="secondary" onClick={() => setVisitModalOpen(false)} className="text-xs">
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button type="button" variant="outline" onClick={() => setVisitModalOpen(false)} className="rounded-xl text-xs font-bold">
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={savingVisit} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold">
+                    <Button type="submit" disabled={savingVisit} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
                       {savingVisit ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Schedule Visit'}
                     </Button>
                   </div>
@@ -3582,69 +4174,63 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── LOG FOLLOW-UP SUB-MODAL ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 6: LOG CARE FOLLOW-UP MODAL                                         */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {followupModalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
-                <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
-                  <div className="flex items-center gap-2">
-                    <Heart className="w-5 h-5 text-rose-600" />
-                    <h3 className="text-sm font-bold text-slate-900">Log Care Follow-up</h3>
-                  </div>
-                  <button onClick={() => setFollowupModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Log Care Follow-up</h3>
+                  <button onClick={() => setFollowupModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                <form onSubmit={handleSaveFollowup} className="p-6 overflow-y-auto flex-1 space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Care Cell
-                    </label>
+                <form onSubmit={handleSaveFollowup} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell *</label>
                     <select
                       value={followupCellId}
                       onChange={(e) => setFollowupCellId(e.target.value)}
+                      required
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
                     >
                       {cells.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.cellCode})
+                          {c.cellCode} — {c.name}
                         </option>
                       ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Member Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. David Abraham"
-                      value={followupMemberName}
-                      onChange={(e) => setFollowupMemberName(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
-                    />
-                  </div>
-
                   <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Phone Number
-                      </label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Member Name *</label>
                       <input
                         type="text"
+                        placeholder="e.g. Rajesh Yeddula"
+                        value={followupMemberName}
+                        onChange={(e) => setFollowupMemberName(e.target.value)}
+                        required
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Phone</label>
+                      <input
+                        type="tel"
                         placeholder="+91..."
                         value={followupMemberPhone}
                         onChange={(e) => setFollowupMemberPhone(e.target.value)}
                         className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                       />
                     </div>
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Follow-up Type
-                      </label>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Channel</label>
                       <select
                         value={followupType}
                         onChange={(e) => setFollowupType(e.target.value)}
@@ -3657,43 +4243,38 @@ export default function CareCellsAdminPage() {
                         ))}
                       </select>
                     </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-slate-700">Reason</label>
+                      <select
+                        value={followupReason}
+                        onChange={(e) => setFollowupReason(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                      >
+                        {FOLLOWUP_REASONS.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Trigger / Reason
-                    </label>
-                    <select
-                      value={followupReason}
-                      onChange={(e) => setFollowupReason(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
-                    >
-                      {FOLLOWUP_REASONS.map((r) => (
-                        <option key={r} value={r}>
-                          {r}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Pastoral Remarks / Action Notes
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Notes / Action Taken</label>
                     <textarea
-                      rows={2}
-                      placeholder="Notes on member situation, conversation summary, and next action..."
+                      placeholder="Spoke with member, prayed for healing, confirmed next meeting attendance..."
                       value={followupNotes}
                       onChange={(e) => setFollowupNotes(e.target.value)}
+                      rows={3}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                     />
                   </div>
 
-                  <div className="pt-2 flex justify-end gap-2">
-                    <Button variant="secondary" onClick={() => setFollowupModalOpen(false)} className="text-xs">
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button type="button" variant="outline" onClick={() => setFollowupModalOpen(false)} className="rounded-xl text-xs font-bold">
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={savingFollowup} className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold">
+                    <Button type="submit" disabled={savingFollowup} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
                       {savingFollowup ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Log Follow-up'}
                     </Button>
                   </div>
@@ -3702,73 +4283,66 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── BROADCAST NOTICE MODAL ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 7: BROADCAST NOTICE MODAL                                           */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {noticeModalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Megaphone className="w-4 h-4 text-amber-600" />
-                    <h3 className="text-sm font-bold text-slate-900">Broadcast Care Cell Notice</h3>
-                  </div>
-                  <button onClick={() => setNoticeModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Broadcast Cell Notice</h3>
+                  <button onClick={() => setNoticeModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
                 <form onSubmit={handleSaveNotice} className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Target Cell
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Target Cell</label>
                     <select
                       value={noticeCellId}
                       onChange={(e) => setNoticeCellId(e.target.value)}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
                     >
-                      <option value="ALL">All Care Cells (Broadcast)</option>
+                      <option value="">All Care Cells</option>
                       {cells.map((c) => (
                         <option key={c.id} value={c.id}>
-                          {c.name} ({c.cellCode})
+                          {c.cellCode} — {c.name}
                         </option>
                       ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Notice Title *
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Title *</label>
                     <input
                       type="text"
-                      required
-                      placeholder="e.g. Fasting Prayer Schedule / Venue Shift"
+                      placeholder="Notice headline..."
                       value={noticeTitle}
                       onChange={(e) => setNoticeTitle(e.target.value)}
+                      required
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Notice Message *
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Message *</label>
                     <textarea
-                      rows={3}
-                      required
-                      placeholder="Announcement message for care cell members..."
+                      placeholder="Announcement body text..."
                       value={noticeMessage}
                       onChange={(e) => setNoticeMessage(e.target.value)}
+                      required
+                      rows={3}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                     />
                   </div>
 
-                  <div className="pt-2 flex justify-end gap-2">
-                    <Button variant="secondary" onClick={() => setNoticeModalOpen(false)} className="text-xs">
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button type="button" variant="outline" onClick={() => setNoticeModalOpen(false)} className="rounded-xl text-xs font-bold">
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={savingNotice} className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold">
-                      {savingNotice ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Broadcast Notice'}
+                    <Button type="submit" disabled={savingNotice} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
+                      {savingNotice ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Publish Notice'}
                     </Button>
                   </div>
                 </form>
@@ -3776,238 +4350,84 @@ export default function CareCellsAdminPage() {
             </div>
           )}
 
-          {/* ── ADD PRAYER REQUEST MODAL ── */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
+          {/* MODAL 8: ADD PRAYER PETITION MODAL                                        */}
+          {/* ───────────────────────────────────────────────────────────────────────── */}
           {prayerModalOpen && (
-            <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-purple-600" />
-                    <h3 className="text-sm font-bold text-slate-900">Add Cell Prayer Request</h3>
-                  </div>
-                  <button onClick={() => setPrayerModalOpen(false)} className="text-slate-400 hover:text-slate-600">
-                    <X className="w-4 h-4" />
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in zoom-in-95">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-base font-extrabold text-slate-900">Add Prayer Request</h3>
+                  <button onClick={() => setPrayerModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-700">
+                    <X className="w-5 h-5" />
                   </button>
                 </div>
 
                 <form onSubmit={handleSavePrayer} className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Member Name *
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Care Cell</label>
+                    <select
+                      value={prayerCellId}
+                      onChange={(e) => setPrayerCellId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
+                    >
+                      <option value="">All Care Cells</option>
+                      {cells.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.cellCode} — {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Member Name *</label>
                     <input
                       type="text"
-                      required
-                      placeholder="e.g. Sister Sarah"
+                      placeholder="e.g. David Abraham"
                       value={prayerMemberName}
                       onChange={(e) => setPrayerMemberName(e.target.value)}
+                      required
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Category
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Category</label>
                     <select
                       value={prayerCategory}
                       onChange={(e) => setPrayerCategory(e.target.value)}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl bg-white"
                     >
-                      {['Healing & Health', 'Job & Career', 'Family Peace', 'Financial Deliverance', 'Spiritual Growth', 'Travel Mercies'].map(
-                        (cat) => (
-                          <option key={cat} value={cat}>
-                            {cat}
-                          </option>
-                        )
-                      )}
+                      <option value="Healing / Health">Healing / Health</option>
+                      <option value="Family / Children">Family / Children</option>
+                      <option value="Financial / Job">Financial / Job</option>
+                      <option value="Spiritual Growth">Spiritual Growth</option>
+                      <option value="Thanksgiving">Thanksgiving</option>
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                      Prayer Request *
-                    </label>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-700">Prayer Petition *</label>
                     <textarea
-                      rows={3}
+                      placeholder="Please pray for..."
+                      value={prayerRequestText}
+                      onChange={(e) => setPrayerRequestText(e.target.value)}
                       required
-                      placeholder="Enter specific petition or intercession need..."
-                      value={prayerRequest}
-                      onChange={(e) => setPrayerRequest(e.target.value)}
+                      rows={3}
                       className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl"
                     />
                   </div>
 
-                  <div className="pt-2 flex justify-end gap-2">
-                    <Button variant="secondary" onClick={() => setPrayerModalOpen(false)} className="text-xs">
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <Button type="button" variant="outline" onClick={() => setPrayerModalOpen(false)} className="rounded-xl text-xs font-bold">
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={savingPrayer} className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold">
-                      {savingPrayer ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Prayer'}
+                    <Button type="submit" disabled={savingPrayer} className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold">
+                      {savingPrayer ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Save Prayer Request'}
                     </Button>
                   </div>
                 </form>
-              </div>
-            </div>
-          )}
-
-          {/* ── BROWSE CHURCH DIRECTORY SUB-MODAL ── */}
-          {showAllMembersPicker && (
-            <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900">Select Members from Church Directory</h3>
-                    <p className="text-xs text-slate-500">
-                      {selectedMembersMap.size} members currently assigned to this care cell
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowAllMembersPicker(false)}
-                    className="text-slate-400 hover:text-slate-600 p-1"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="p-3 border-b border-slate-100">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Search member by name, phone or locality..."
-                      value={memberDirectorySearch}
-                      onChange={(e) => setMemberDirectorySearch(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
-                  {membersPool
-                    .filter((m) => {
-                      if (!memberDirectorySearch.trim()) return true;
-                      const q = memberDirectorySearch.toLowerCase().trim();
-                      return m.name.toLowerCase().includes(q) || m.phone.includes(q) || (m.locality && m.locality.toLowerCase().includes(q));
-                    })
-                    .slice(0, 30)
-                    .map((m) => {
-                      const isSel = selectedMembersMap.has(m.id);
-                      return (
-                        <div
-                          key={m.id}
-                          onClick={() => toggleMemberSelection(m)}
-                          className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
-                            isSel
-                              ? 'bg-blue-50/70 border-blue-300 shadow-xs'
-                              : 'bg-white border-slate-200 hover:border-slate-300'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div
-                              className={`w-4 h-4 rounded flex items-center justify-center border transition-all ${
-                                isSel ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300 bg-white'
-                              }`}
-                            >
-                              {isSel && <Check className="w-3 h-3 stroke-[3]" />}
-                            </div>
-                            <div className="min-w-0">
-                              <span className="text-xs font-bold text-slate-900 block truncate">{m.name}</span>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                {m.locality && (
-                                  <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium flex items-center gap-1">
-                                    <MapPin className="w-2.5 h-2.5 text-slate-500" />
-                                    {m.locality}
-                                  </span>
-                                )}
-                                {m.phone && <span className="text-[10px] text-slate-500">{m.phone}</span>}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-
-                <div className="p-3 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700">
-                    {selectedMembersMap.size} selected
-                  </span>
-                  <Button
-                    onClick={() => setShowAllMembersPicker(false)}
-                    className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-1.5"
-                  >
-                    Done
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── MEMBER PICKER SUB-MODAL (FOR LEADER OR ASSISTANT) ── */}
-          {(showLeaderPicker || showAssistantPicker) && (
-            <div className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
-                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {showLeaderPicker ? 'Select Cell Leader' : 'Assign Assistant Leader'}
-                  </h3>
-                  <button
-                    onClick={() => {
-                      setShowLeaderPicker(false);
-                      setShowAssistantPicker(false);
-                    }}
-                    className="text-slate-400 hover:text-slate-600 p-1"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-                <div className="p-3 border-b border-slate-100">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      type="text"
-                      placeholder="Search member by name, phone or locality..."
-                      value={leaderSearchQuery}
-                      onChange={(e) => setLeaderSearchQuery(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-                <div className="p-3 overflow-y-auto flex-1 space-y-1.5">
-                  {membersPool
-                    .filter((m) => {
-                      if (!leaderSearchQuery.trim()) return true;
-                      const q = leaderSearchQuery.toLowerCase().trim();
-                      return m.name.toLowerCase().includes(q) || m.phone.includes(q) || (m.locality && m.locality.toLowerCase().includes(q));
-                    })
-                    .slice(0, 20)
-                    .map((m) => (
-                      <div
-                        key={m.id}
-                        onClick={() => (showLeaderPicker ? handleSelectLeader(m) : handleSelectAssistant(m))}
-                        className="p-2.5 rounded-xl hover:bg-slate-50 border border-transparent hover:border-slate-200 cursor-pointer flex items-center justify-between gap-3 transition-colors"
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-700 shrink-0">
-                            {m.name
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .slice(0, 2)
-                              .toUpperCase()}
-                          </div>
-                          <div className="min-w-0">
-                            <span className="text-xs font-bold text-slate-900 truncate block">{m.name}</span>
-                            <span className="text-[11px] text-slate-500 truncate block">
-                              {m.phone} {m.locality ? `· ${m.locality}` : ''}
-                            </span>
-                          </div>
-                        </div>
-                        <Check className="w-4 h-4 text-slate-300" />
-                      </div>
-                    ))}
-                </div>
               </div>
             </div>
           )}
