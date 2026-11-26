@@ -1388,20 +1388,23 @@ export default function AttendanceAdminPage() {
                               </div>
 
                               {/* Title & Date/Time */}
-                              <div>
-                                <h3 className="font-bold text-base text-slate-900 dark:text-white group-hover:text-amber-500 transition-colors">
+                              <div className="min-w-0">
+                                <h3 className="font-bold text-base text-slate-900 dark:text-white group-hover:text-amber-500 transition-colors truncate" title={ev.title}>
                                   {ev.title}
                                 </h3>
-                                <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-slate-400 mt-1">
-                                  <span className="flex items-center gap-1">
-                                    <Clock size={13} className="text-slate-400" />
-                                    <span>{ev.timeStr}</span>
-                                  </span>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-1 min-w-0">
+                                  <div className="flex items-center gap-1 shrink-0 font-medium whitespace-nowrap">
+                                    <Clock size={13} className="text-slate-400 shrink-0" />
+                                    <span className="whitespace-nowrap">{ev.timeStr}</span>
+                                  </div>
                                   {ev.location && (
-                                    <span className="flex items-center gap-1 text-[11px] text-slate-400">
-                                      <MapPin size={12} />
-                                      <span className="truncate">{ev.location}</span>
-                                    </span>
+                                    <>
+                                      <span className="text-slate-300 dark:text-slate-700 shrink-0">•</span>
+                                      <div className="flex items-center gap-1 min-w-0 flex-1 overflow-hidden" title={ev.location}>
+                                        <MapPin size={12} className="text-slate-400 shrink-0" />
+                                        <span className="truncate block text-[11px] text-slate-400">{ev.location}</span>
+                                      </div>
+                                    </>
                                   )}
                                 </div>
                               </div>
@@ -1524,9 +1527,9 @@ export default function AttendanceAdminPage() {
                           {selectedEvent.title}
                         </h2>
                         {selectedEvent.location && (
-                          <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
-                            <MapPin size={12} />
-                            <span>{selectedEvent.location}</span>
+                          <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5 truncate" title={selectedEvent.location}>
+                            <MapPin size={12} className="shrink-0" />
+                            <span className="truncate">{selectedEvent.location}</span>
                           </p>
                         )}
                       </div>
