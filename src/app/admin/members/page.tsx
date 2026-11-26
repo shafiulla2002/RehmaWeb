@@ -128,9 +128,69 @@ interface FirebaseMemberRecord {
   createdAt?: string;
   updatedAt?: string;
   photoURL?: string;
+  profilePhoto?: string;
+  photoUrl?: string;
+  profileImageUrl?: string;
+  PhotoUrl?: string;
   profilePicture?: string;
+  avatarUrl?: string;
   memberCode?: string;
   familyRole?: string;
+}
+
+function MemberAvatar({
+  member,
+  size = 36,
+  className = '',
+}: {
+  member: FirebaseMemberRecord;
+  size?: number;
+  className?: string;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const photo =
+    member.photoURL ||
+    member.profilePhoto ||
+    member.photoUrl ||
+    member.profileImageUrl ||
+    member.PhotoUrl ||
+    member.profilePicture ||
+    member.avatarUrl ||
+    '';
+
+  const name = (member.fullName || member.name || member.displayName || '').trim();
+  const initials =
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((n) => n[0].toUpperCase())
+      .join('') || (name ? name[0].toUpperCase() : 'M');
+
+  if (photo && !imgError) {
+    return (
+      <img
+        src={photo}
+        alt={name || 'Member'}
+        onError={() => setImgError(true)}
+        style={{ width: size, height: size }}
+        className={`rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-800 shadow-xs ${className}`}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.max(10, Math.round(size * 0.36)),
+      }}
+      className={`rounded-full bg-slate-900 dark:bg-black text-white font-extrabold flex items-center justify-center shrink-0 tracking-tight border border-slate-700/30 ${className}`}
+    >
+      {initials}
+    </div>
+  );
 }
 
 interface FirebaseRegistrationRequest {
@@ -218,17 +278,42 @@ export default function MembersCrmAdminPage() {
     const membersCol = collection(db, 'Rhema Church', 'rhema', 'members');
     const reqCol = collection(db, 'Rhema Church', 'rhema', 'registration_requests');
 
-    // Subscribe to members
+    // Subscribe to members with deduplication matching canonical mobile congregation view
     const unsubMembers = onSnapshot(
       membersCol,
       (snapshot) => {
-        const memList: FirebaseMemberRecord[] = [];
+        const rawMap = new Map<string, FirebaseMemberRecord>();
         snapshot.forEach((d) => {
           const data = d.data();
-          memList.push({
+          if (data.status === 'Left') return;
+
+          const rawName = (
+            data.fullName ||
+            data.name ||
+            data.displayName ||
+            `${data.firstName || ''} ${data.lastName || ''}`.trim() ||
+            (data.phone ? `Member (${data.phone})` : 'Unknown')
+          ).trim();
+
+          const key = rawName.toLowerCase() || d.id;
+
+          const photo =
+            data.photoURL ||
+            data.profilePhoto ||
+            data.photoUrl ||
+            data.profileImageUrl ||
+            data.PhotoUrl ||
+            data.profilePicture ||
+            data.avatarUrl ||
+            data.photo ||
+            data.picture ||
+            '';
+
+          const record: FirebaseMemberRecord = {
             id: d.id,
-            name: data.name || data.fullName || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Church Member',
-            fullName: data.fullName || data.name || `${data.firstName || ''} ${data.lastName || ''}`.trim() || 'Church Member',
+            name: rawName,
+            fullName: rawName,
+            displayName: rawName,
             firstName: data.firstName || '',
             lastName: data.lastName || '',
             phone: data.phone || data.normalizedPhone10 || '',
@@ -255,8 +340,29 @@ export default function MembersCrmAdminPage() {
             joinDate: data.joinDate || data.createdAt || '',
             memberCode: data.memberCode || `RHM-${d.id.substring(0, 6).toUpperCase()}`,
             familyRole: data.familyRole || 'Head of Household',
-          });
+            photoURL: photo,
+            profilePhoto: photo,
+            photoUrl: photo,
+            profileImageUrl: photo,
+            PhotoUrl: photo,
+            profilePicture: photo,
+            avatarUrl: photo,
+          };
+
+          if (!rawMap.has(key)) {
+            rawMap.set(key, record);
+          } else {
+            const existing = rawMap.get(key)!;
+            // Prefer record with photo or more complete contact info
+            if (!existing.photoURL && photo) {
+              rawMap.set(key, { ...existing, ...record, photoURL: photo, profilePhoto: photo, photoUrl: photo, profileImageUrl: photo });
+            } else if (!existing.phone && record.phone) {
+              rawMap.set(key, { ...existing, phone: record.phone, normalizedPhone10: record.normalizedPhone10 });
+            }
+          }
         });
+
+        const memList = Array.from(rawMap.values());
         setMembers(memList);
         setLoading(false);
       },
@@ -1053,9 +1159,7 @@ export default function MembersCrmAdminPage() {
                           >
                             <td className="py-3.5 px-4">
                               <div className="flex items-center gap-3">
-                                <div className="w-8 h-8 rounded-full bg-amber-500/10 text-amber-500 font-bold flex items-center justify-center shrink-0">
-                                  {(m.fullName || m.name || 'M')[0].toUpperCase()}
-                                </div>
+                                <MemberAvatar member={m} size={36} />
                                 <div>
                                   <span className="font-bold text-slate-900 dark:text-white block">
                                     {m.fullName || m.name}
@@ -1714,9 +1818,7 @@ export default function MembersCrmAdminPage() {
                 </div>
 
                 <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 font-bold text-2xl flex items-center justify-center shrink-0">
-                    {(selectedMember.fullName || selectedMember.name || 'M')[0].toUpperCase()}
-                  </div>
+                  <MemberAvatar member={selectedMember} size={64} className="rounded-2xl" />
                   <div>
                     <h2 className="text-lg font-bold text-slate-900 dark:text-white">
                       {selectedMember.fullName || selectedMember.name}
