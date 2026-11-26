@@ -279,19 +279,44 @@ export default function TestimonyModerationAdminPage() {
 
       setTestimonies(list);
 
-      // Fetch member photos
+      // Fetch member photos (loading all church members to resolve live profile photos)
       try {
         const membersRef = collection(db, 'Rhema Church', 'rhema', 'members');
-        const mSnap = await getDocs(query(membersRef, limit(100)));
+        const mSnap = await getDocs(membersRef);
         const map: Record<string, { photoURL: string; name: string }> = {};
         mSnap.forEach((mDoc) => {
           const mData = mDoc.data();
-          const pUrl = mData.photoURL || mData.profilePhotoUrl || '';
-          const name = mData.name || mData.fullName || '';
+          const pUrl =
+            mData.profilePhoto ||
+            mData.ProfilePhoto ||
+            mData.photoURL ||
+            mData.photoUrl ||
+            mData.Photo ||
+            mData.PhotoUrl ||
+            mData.profileImage ||
+            mData.profileImageUrl ||
+            mData.avatar ||
+            mData.avatarUrl ||
+            mData.photo ||
+            mData.image ||
+            mData.picture ||
+            mData.profilePhotoUrl ||
+            '';
+          const name = mData.name || mData.fullName || mData.displayName || '';
           if (pUrl) {
-            map[mDoc.id] = { photoURL: pUrl, name };
-            const digits = (mData.phone || '').replace(/\D/g, '').slice(-10);
-            if (digits) map[digits] = { photoURL: pUrl, name };
+            const entry = { photoURL: pUrl, name };
+            map[mDoc.id] = entry;
+            if (mData.uid) map[mData.uid] = entry;
+            if (mData.id) map[mData.id] = entry;
+            if (mData.memberId) map[mData.memberId] = entry;
+            if (mData.phone) {
+              map[mData.phone] = entry;
+              const clean = String(mData.phone).replace(/\D/g, '').slice(-10);
+              if (clean) map[clean] = entry;
+            }
+            if (name) {
+              map[name.trim().toLowerCase()] = entry;
+            }
           }
         });
         setMemberProfilesMap(map);
@@ -316,7 +341,9 @@ export default function TestimonyModerationAdminPage() {
     const digits = getPhoneDigits(item.memberPhone);
     const byId = item.memberId ? memberProfilesMap[item.memberId] : undefined;
     const byPhone = digits ? memberProfilesMap[digits] : undefined;
-    const profileData = byId || byPhone;
+    const byRawPhone = item.memberPhone ? memberProfilesMap[item.memberPhone] : undefined;
+    const byName = item.memberName ? memberProfilesMap[item.memberName.trim().toLowerCase()] : undefined;
+    const profileData = byId || byPhone || byRawPhone || byName;
 
     const photoURL = profileData?.photoURL || item.memberPhotoUrl || null;
     const name = profileData?.name || item.memberName || 'Church Member';
@@ -869,12 +896,20 @@ export default function TestimonyModerationAdminPage() {
                               src={profile.photoURL}
                               alt={profile.name}
                               className="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 shadow-sm"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (fallback) fallback.classList.remove('hidden');
+                              }}
                             />
-                          ) : (
-                            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
-                              {getInitials(profile.name)}
-                            </div>
-                          )}
+                          ) : null}
+                          <div
+                            className={`w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm ${
+                              profile.photoURL ? 'hidden' : ''
+                            }`}
+                          >
+                            {getInitials(profile.name)}
+                          </div>
                           <div>
                             <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
                               <span>{profile.name}</span>
@@ -1125,12 +1160,20 @@ export default function TestimonyModerationAdminPage() {
                               src={prof.photoURL}
                               alt={prof.name}
                               className="w-12 h-12 rounded-full object-cover border border-slate-200 dark:border-slate-700 shadow-sm"
+                              onError={(e) => {
+                                e.currentTarget.style.display = 'none';
+                                const fallback = e.currentTarget.nextElementSibling as HTMLElement;
+                                if (fallback) fallback.classList.remove('hidden');
+                              }}
                             />
-                          ) : (
-                            <div className="w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-black text-sm">
-                              {getInitials(prof.name)}
-                            </div>
-                          )}
+                          ) : null}
+                          <div
+                            className={`w-12 h-12 rounded-full bg-blue-600 flex items-center justify-center text-white font-black text-sm ${
+                              prof.photoURL ? 'hidden' : ''
+                            }`}
+                          >
+                            {getInitials(prof.name)}
+                          </div>
                           <div>
                             <div className="font-bold text-base text-slate-900 dark:text-white">
                               {prof.name}

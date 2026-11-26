@@ -267,14 +267,12 @@ export default function PrayerModerationAdminPage() {
   const [deletingPrayer, setDeletingPrayer] = useState<FirebasePrayerRecord | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // + New Prayer Request Modal State
+  // + New Prayer Request Modal State (Exact Mobile Parity)
   const [showNewPrayerModal, setShowNewPrayerModal] = useState(false);
-  const [newPrayerAuthor, setNewPrayerAuthor] = useState('');
-  const [newPrayerPhone, setNewPrayerPhone] = useState('');
+  const [selectedMember, setSelectedMember] = useState<{ id: string; name: string; phone?: string } | null>(null);
   const [newPrayerCategory, setNewPrayerCategory] = useState<PrayerCategory>('Pray for me');
   const [newPrayerTextEn, setNewPrayerTextEn] = useState('');
   const [newPrayerTextTe, setNewPrayerTextTe] = useState('');
-  const [newPrayerPrivacy, setNewPrayerPrivacy] = useState<'public' | 'private'>('public');
   const [newPrayerPostAs, setNewPrayerPostAs] = useState(adminName);
   const [isSubmittingNewPrayer, setIsSubmittingNewPrayer] = useState(false);
 
@@ -688,28 +686,34 @@ export default function PrayerModerationAdminPage() {
     }
   };
 
-  // Submit New Prayer Request (Pastor Request Workflow)
+  // Submit New Prayer Request (Pastor Request Workflow - Exact Mobile Parity)
   const handleCreateNewPrayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPrayerTextEn.trim()) {
-      showToast('Please type the prayer request message.');
+      showToast('Please type the prayer request details.');
       return;
     }
     try {
       setIsSubmittingNewPrayer(true);
       const colRef = collection(db, 'Rhema Church', 'rhema', 'prayerRequests');
-      const author = newPrayerAuthor.trim() || newPrayerPostAs || adminName;
+      const author = selectedMember ? selectedMember.name : (newPrayerPostAs || adminName);
+      const phone = selectedMember ? (selectedMember.phone || null) : null;
+      const contactId = selectedMember ? selectedMember.id : null;
 
       await addDoc(colRef, {
         authorName: author,
         name: author,
-        phone: newPrayerPhone.trim() || null,
+        phone: phone,
+        contactId: contactId,
         category: newPrayerCategory,
         text: newPrayerTextEn.trim(),
         request: newPrayerTextEn.trim(),
+        requestEn: newPrayerTextEn.trim(),
         textTe: newPrayerTextTe.trim() || null,
-        isPublic: newPrayerPrivacy === 'public',
-        type: newPrayerPrivacy,
+        requestTe: newPrayerTextTe.trim() || null,
+        postAs: newPrayerPostAs,
+        isPublic: true,
+        type: 'public',
         isAnswered: false,
         isClosed: false,
         status: 'pending',
@@ -720,16 +724,17 @@ export default function PrayerModerationAdminPage() {
         updatedAt: serverTimestamp(),
       });
 
-      showToast('New prayer petition recorded successfully! ✨');
+      showToast('Prayer request submitted successfully! ✨');
       setShowNewPrayerModal(false);
       setNewPrayerTextEn('');
       setNewPrayerTextTe('');
-      setNewPrayerAuthor('');
-      setNewPrayerPhone('');
+      setSelectedMember(null);
+      setMemberSearchQuery('');
+      setMemberSearchResults([]);
       loadPrayers();
     } catch (err: any) {
       console.error('Error creating prayer request:', err);
-      showToast('Failed to create prayer request: ' + (err.message || 'Error'));
+      showToast('Failed to submit prayer request: ' + (err.message || 'Error'));
     } finally {
       setIsSubmittingNewPrayer(false);
     }
@@ -1572,95 +1577,101 @@ export default function PrayerModerationAdminPage() {
             </div>
           )}
 
-          {/* ── + NEW PRAYER REQUEST MODAL (Mobile Pastor Request Workflow) ── */}
+          {/* ── + NEW PRAYER REQUEST MODAL (Exact Mobile Screen Parity) ── */}
           {showNewPrayerModal && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative max-h-[92vh] overflow-y-auto">
-                <button
-                  type="button"
-                  onClick={() => setShowNewPrayerModal(false)}
-                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white p-1"
-                >
-                  <X size={18} />
-                </button>
-
-                <div className="space-y-1">
-                  <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <Plus size={18} className="text-emerald-500" />
-                    <span>Create New Prayer Request</span>
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl relative max-h-[92vh] overflow-y-auto">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
+                  <h3 className="text-lg font-black text-slate-900 dark:text-white">
+                    Create New Prayer Request
                   </h3>
-                  <p className="text-xs text-slate-500">
-                    Submit a congregation prayer petition on behalf of a member or corporate gathering.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowNewPrayerModal(false);
+                      setSelectedMember(null);
+                      setMemberSearchQuery('');
+                      setMemberSearchResults([]);
+                    }}
+                    className="p-1 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <XCircle size={22} />
+                  </button>
                 </div>
 
-                <form onSubmit={handleCreateNewPrayer} className="space-y-3.5">
-                  {/* Member Quick Search or Manual Input */}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                      Church Member / Author
+                <form onSubmit={handleCreateNewPrayer} className="space-y-4">
+                  {/* Field 1: Church Member */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Church Member
                     </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={newPrayerAuthor}
-                        onChange={(e) => {
-                          setNewPrayerAuthor(e.target.value);
-                          handleSearchMembers(e.target.value);
-                        }}
-                        placeholder="Search congregation roster or type name..."
-                        className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none"
-                      />
-                      {isSearchingMembers && (
-                        <RefreshCw size={13} className="animate-spin absolute right-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                      )}
-                    </div>
+                    {selectedMember ? (
+                      <div className="px-3.5 py-2.5 rounded-2xl bg-slate-900 text-white dark:bg-slate-800 flex items-center justify-between text-xs font-semibold">
+                        <div className="flex items-center gap-2">
+                          <User size={14} className="text-slate-300" />
+                          <span>{selectedMember.name}</span>
+                          {selectedMember.phone && (
+                            <span className="text-[11px] text-slate-400 font-mono">({selectedMember.phone})</span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedMember(null);
+                            setMemberSearchQuery('');
+                          }}
+                          className="text-slate-400 hover:text-white"
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={memberSearchQuery}
+                          onChange={(e) => handleSearchMembers(e.target.value)}
+                          placeholder="Search by name or phone..."
+                          className="w-full px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                        {isSearchingMembers && (
+                          <RefreshCw size={13} className="animate-spin absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        )}
 
-                    {/* Member search dropdown autocomplete */}
-                    {memberSearchResults.length > 0 && (
-                      <div className="p-1 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-lg space-y-0.5">
-                        {memberSearchResults.map((m) => (
-                          <button
-                            key={m.id}
-                            type="button"
-                            onClick={() => {
-                              setNewPrayerAuthor(m.name);
-                              setNewPrayerPhone(m.phone || '');
-                              setMemberSearchResults([]);
-                            }}
-                            className="w-full text-left px-3 py-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-between text-xs"
-                          >
-                            <span className="font-bold text-slate-900 dark:text-white">{m.name}</span>
-                            <span className="text-[11px] text-slate-400 font-mono">{m.phone}</span>
-                          </button>
-                        ))}
+                        {/* Search dropdown results */}
+                        {memberSearchResults.length > 0 && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-30 p-1.5 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xl space-y-0.5 max-h-48 overflow-y-auto">
+                            {memberSearchResults.map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedMember({ id: m.id, name: m.name, phone: m.phone });
+                                  setMemberSearchResults([]);
+                                  setMemberSearchQuery('');
+                                }}
+                                className="w-full text-left px-3 py-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center justify-between text-xs transition-colors"
+                              >
+                                <div className="font-bold text-slate-900 dark:text-white">{m.name}</div>
+                                <div className="text-[11px] text-slate-400 font-mono">{m.phone}</div>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
-                  {/* Phone */}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                      Contact Phone (WhatsApp)
-                    </label>
-                    <input
-                      type="text"
-                      value={newPrayerPhone}
-                      onChange={(e) => setNewPrayerPhone(e.target.value)}
-                      placeholder="+91 98765 43210"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none font-mono"
-                    />
-                  </div>
-
-                  {/* Category */}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                  {/* Field 2: Prayer Category */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
                       Prayer Category
                     </label>
                     <select
                       value={newPrayerCategory}
                       onChange={(e) => setNewPrayerCategory(e.target.value as PrayerCategory)}
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none"
+                      className="w-full px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
                     >
                       {PRAYER_CATEGORIES.map((cat) => (
                         <option key={cat} value={cat}>
@@ -1670,83 +1681,64 @@ export default function PrayerModerationAdminPage() {
                     </select>
                   </div>
 
-                  {/* English Prayer Request */}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                      Prayer Request (English) *
+                  {/* Field 3: Prayer request text — English */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Prayer request text — English
                     </label>
                     <textarea
-                      rows={3}
+                      rows={4}
                       required
                       value={newPrayerTextEn}
                       onChange={(e) => setNewPrayerTextEn(e.target.value)}
-                      placeholder="Please pray for healing and God's peace..."
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none resize-none"
+                      placeholder="Type the prayer request details..."
+                      className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 resize-none font-sans"
                     />
                   </div>
 
-                  {/* Optional Telugu Prayer Request */}
-                  <div className="space-y-1">
-                    <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                      Telugu Translation (Optional)
+                  {/* Field 4: Detailed Prayer Request */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Detailed Prayer Request
                     </label>
                     <textarea
-                      rows={2}
+                      rows={3}
                       value={newPrayerTextTe}
                       onChange={(e) => setNewPrayerTextTe(e.target.value)}
-                      placeholder="దయచేసి ప్రార్థించండి..."
-                      className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white focus:outline-none resize-none font-serif"
+                      placeholder="ప్రార్థన మనవి వివరాలను టైప్ చేయండి..."
+                      className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 resize-none font-serif italic"
                     />
                   </div>
 
-                  {/* Post As & Privacy */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                        Post As
-                      </label>
-                      <select
-                        value={newPrayerPostAs}
-                        onChange={(e) => setNewPrayerPostAs(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none"
-                      >
-                        <option value={adminName}>{adminName} (Pastor)</option>
-                        <option value="Church — Corporate">Church — Corporate</option>
-                        <option value="Anonymous">Anonymous</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                        Privacy Mode
-                      </label>
-                      <select
-                        value={newPrayerPrivacy}
-                        onChange={(e) => setNewPrayerPrivacy(e.target.value as any)}
-                        className="w-full px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-900 dark:text-white focus:outline-none"
-                      >
-                        <option value="public">Wall (Public)</option>
-                        <option value="private">Confidential (Private)</option>
-                      </select>
-                    </div>
+                  {/* Field 5: Post as */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Post as
+                    </label>
+                    <select
+                      value={newPrayerPostAs}
+                      onChange={(e) => setNewPrayerPostAs(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 cursor-pointer"
+                    >
+                      <option value={adminName}>{adminName}</option>
+                      <option value="Church — Corporate">Church — Corporate</option>
+                      <option value="Anonymous">Anonymous</option>
+                    </select>
                   </div>
 
-                  {/* Form Footer */}
-                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowNewPrayerModal(false)}
-                      className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300"
-                    >
-                      Cancel
-                    </button>
+                  {/* Submit Button (Matching Mobile: Full width pill button with Megaphone icon) */}
+                  <div className="pt-2">
                     <button
                       type="submit"
                       disabled={isSubmittingNewPrayer}
-                      className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold shadow-lg shadow-emerald-950/20 flex items-center gap-1.5"
+                      className="w-full py-3.5 rounded-full bg-black hover:bg-slate-800 text-white disabled:opacity-50 text-xs font-bold shadow-xl flex items-center justify-center gap-2 transition-all cursor-pointer"
                     >
-                      {isSubmittingNewPrayer ? <RefreshCw size={13} className="animate-spin" /> : <Plus size={14} />}
-                      <span>Save Prayer Petition</span>
+                      {isSubmittingNewPrayer ? (
+                        <RefreshCw size={15} className="animate-spin" />
+                      ) : (
+                        <Megaphone size={16} />
+                      )}
+                      <span>Submit Prayer Request</span>
                     </button>
                   </div>
                 </form>
