@@ -44,6 +44,7 @@ import {
   Flame,
   Car,
   Check,
+  FileText,
 } from 'lucide-react';
 
 export type VolunteerType = 'general' | 'event';
@@ -161,6 +162,86 @@ const COMMON_EVENT_ROLES = [
   'Prayer Team Support',
 ];
 
+interface ScheduleSlot {
+  days: string[];
+  startTime: string;
+  endTime: string;
+}
+
+const WEEKDAYS = [
+  { label: 'S', full: 'Sun', name: 'Sunday' },
+  { label: 'M', full: 'Mon', name: 'Monday' },
+  { label: 'T', full: 'Tue', name: 'Tuesday' },
+  { label: 'W', full: 'Wed', name: 'Wednesday' },
+  { label: 'T', full: 'Thu', name: 'Thursday' },
+  { label: 'F', full: 'Fri', name: 'Friday' },
+  { label: 'S', full: 'Sat', name: 'Saturday' },
+];
+
+const SKILL_CATEGORIES = [
+  { id: 'worship', name: 'Worship & Music', emoji: '🎵' },
+  { id: 'tech', name: 'Media & Tech', emoji: '🎬' },
+  { id: 'hospitality', name: 'Hospitality', emoji: '🤝' },
+  { id: 'teaching', name: 'Kids & Teaching', emoji: '📖' },
+  { id: 'facilities', name: 'Setup & Campus', emoji: '🛠' },
+  { id: 'care', name: 'Prayer & Care', emoji: '❤️' },
+];
+
+const SKILLS_BY_CATEGORY: Record<string, string[]> = {
+  worship: [
+    'Vocals (Lead / Choir)',
+    'Keyboard / Piano',
+    'Acoustic / Electric Guitar',
+    'Bass Guitar',
+    'Drums / Percussion',
+    'Sound Mixing / Audio Tech',
+    'Song Directing / Arranging',
+  ],
+  tech: [
+    'Live Stream Camera Op',
+    'ProPresenter / Lyrics Display',
+    'Video Editing / Reels',
+    'Photography',
+    'Graphic Design',
+    'Lighting Console',
+    'Social Media Management',
+  ],
+  hospitality: [
+    'Greeting & Welcome',
+    'Ushering & Seating',
+    'Food / Refreshments Prep',
+    'Event Registration',
+    'Parking & Traffic Team',
+    'New Visitor Follow-up',
+    'First Aid / Medical Care',
+  ],
+  teaching: [
+    'Sunday School Teacher',
+    'Kids Craft & Activities',
+    'Youth Group Mentor',
+    'Bible Study Leader',
+    'Nursery / Toddler Care',
+    'Drama & Skit Directing',
+  ],
+  facilities: [
+    'Stage Setup & Teardown',
+    'Sound Equipment Rigging',
+    'Facility Cleaning / Janitorial',
+    'Campus Decoration',
+    'Security & Safety Watch',
+    'Electrical & Maintenance',
+    'Transport / Driving',
+  ],
+  care: [
+    'Intercessory Prayer Team',
+    'Hospital & Home Visits',
+    'Bereavement Support',
+    'Counseling & Encouragement',
+    'Translation (Telugu/English)',
+    'Elderly Assistance',
+  ],
+};
+
 export default function VolunteerManagementAdminPage() {
   const [applications, setApplications] = useState<VolunteerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -190,6 +271,22 @@ export default function VolunteerManagementAdminPage() {
   const [callSlotsNeeded, setCallSlotsNeeded] = useState('Open / Any');
   const [customSlots, setCustomSlots] = useState('');
   const [callMinistries, setCallMinistries] = useState<string[]>(['Worship & Choir', 'Media & Sound / Tech']);
+  
+  // Recommended Skills & Talents (Mobile Parity: VolunteerScreen & AdminOpportunityEditor)
+  const [callSkills, setCallSkills] = useState<string[]>([]);
+  const [activeSkillCategory, setActiveSkillCategory] = useState('worship');
+  const [customSkill, setCustomSkill] = useState('');
+  
+  // Schedule & Time Commitment (Mobile Parity: AdminOpportunityEditor)
+  const [callSchedules, setCallSchedules] = useState<ScheduleSlot[]>([
+    { days: ['Sun'], startTime: '09:00', endTime: '12:30' },
+  ]);
+  const [timeCommitmentPreset, setTimeCommitmentPreset] = useState('2-3 hrs / service');
+  const [customCommitment, setCustomCommitment] = useState('');
+  
+  // Key Responsibilities & Prerequisites (Mobile Parity)
+  const [responsibilities, setResponsibilities] = useState<string[]>(['']);
+  const [specialPrerequisites, setSpecialPrerequisites] = useState('');
   const [postingCall, setPostingCall] = useState(false);
 
   const handleOpenPostCallModal = () => {
@@ -198,8 +295,94 @@ export default function VolunteerManagementAdminPage() {
     setCallSlotsNeeded('Open / Any');
     setCustomSlots('');
     setCallMinistries(['Worship & Choir', 'Media & Sound / Tech']);
+    setCallSkills([]);
+    setActiveSkillCategory('worship');
+    setCustomSkill('');
+    setCallSchedules([{ days: ['Sun'], startTime: '09:00', endTime: '12:30' }]);
+    setTimeCommitmentPreset('2-3 hrs / service');
+    setCustomCommitment('');
+    setResponsibilities(['']);
+    setSpecialPrerequisites('');
     setShowPostCallModal(true);
   };
+
+  const toggleCallSkill = (skill: string) => {
+    setCallSkills((prev) =>
+      prev.includes(skill) ? prev.filter((s) => s !== skill) : [...prev, skill]
+    );
+  };
+
+  const handleAddCustomSkill = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!customSkill.trim()) return;
+    if (!callSkills.includes(customSkill.trim())) {
+      setCallSkills((prev) => [...prev, customSkill.trim()]);
+    }
+    setCustomSkill('');
+  };
+
+  const handleAddScheduleSlot = () => {
+    setCallSchedules((prev) => [
+      ...prev,
+      { days: ['Sun'], startTime: '09:00', endTime: '12:30' },
+    ]);
+  };
+
+  const handleRemoveScheduleSlot = (idx: number) => {
+    if (callSchedules.length > 1) {
+      setCallSchedules((prev) => prev.filter((_, i) => i !== idx));
+    }
+  };
+
+  const handleToggleScheduleDay = (slotIdx: number, dayFull: string) => {
+    setCallSchedules((prev) =>
+      prev.map((slot, i) => {
+        if (i !== slotIdx) return slot;
+        const exists = slot.days.includes(dayFull);
+        const newDays = exists
+          ? slot.days.filter((d) => d !== dayFull)
+          : [...slot.days, dayFull];
+        return { ...slot, days: newDays.length > 0 ? newDays : [dayFull] };
+      })
+    );
+  };
+
+  const handleUpdateScheduleTime = (
+    slotIdx: number,
+    field: 'startTime' | 'endTime',
+    value: string
+  ) => {
+    setCallSchedules((prev) =>
+      prev.map((slot, i) => (i === slotIdx ? { ...slot, [field]: value } : slot))
+    );
+  };
+
+  const handleAddResponsibility = () => {
+    setResponsibilities((prev) => [...prev, '']);
+  };
+
+  const handleUpdateResponsibility = (val: string, idx: number) => {
+    setResponsibilities((prev) =>
+      prev.map((r, i) => (i === idx ? val : r))
+    );
+  };
+
+  const handleRemoveResponsibility = (idx: number) => {
+    if (responsibilities.length > 1) {
+      setResponsibilities((prev) => prev.filter((_, i) => i !== idx));
+    }
+  };
+
+  const computedScheduleSummary = useMemo(() => {
+    if (customCommitment.trim()) return customCommitment.trim();
+    if (callSchedules.length > 0) {
+      const slotsSummary = callSchedules
+        .map((s) => `${s.days.join(', ')} (${s.startTime} - ${s.endTime})`)
+        .join('; ');
+      return `${timeCommitmentPreset} · ${slotsSummary}`;
+    }
+    return timeCommitmentPreset;
+  }, [customCommitment, timeCommitmentPreset, callSchedules]);
 
   // Real-time Firestore subscription to canonical church collection
   useEffect(() => {
@@ -468,6 +651,7 @@ export default function VolunteerManagementAdminPage() {
     setPostingCall(true);
     try {
       const finalSlots = customSlots.trim() ? `${customSlots.trim()} Needed` : callSlotsNeeded;
+      const cleanResponsibilities = responsibilities.map((r) => r.trim()).filter(Boolean);
 
       // 1. Save to volunteer_calls collection
       const callsCol = collection(db, 'Rhema Church', 'rhema', 'volunteer_calls');
@@ -476,6 +660,11 @@ export default function VolunteerManagementAdminPage() {
         description: callDescription.trim(),
         slotsNeeded: finalSlots,
         targetMinistries: callMinistries,
+        skills: callSkills,
+        schedules: callSchedules,
+        timeCommitment: computedScheduleSummary,
+        responsibilities: cleanResponsibilities,
+        specialPrerequisites: specialPrerequisites.trim(),
         status: 'active',
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -485,10 +674,14 @@ export default function VolunteerManagementAdminPage() {
       const notifCol = collection(db, 'Rhema Church', 'rhema', 'notifications');
       await addDoc(notifCol, {
         title: `Volunteer Call: ${callTitle.trim()}`,
-        message: callDescription.trim() || `Volunteers needed (${finalSlots}) for: ${callMinistries.join(', ')}.`,
+        message:
+          callDescription.trim() ||
+          `Volunteers needed (${finalSlots}) for: ${callMinistries.join(', ')}. Schedule: ${computedScheduleSummary}`,
         type: 'volunteer_call',
         targetMinistries: callMinistries,
         slotsNeeded: finalSlots,
+        timeCommitment: computedScheduleSummary,
+        skills: callSkills,
         createdAt: serverTimestamp(),
       });
 
@@ -956,7 +1149,7 @@ export default function VolunteerManagementAdminPage() {
           {/* ── POST VOLUNTEER CALL MODAL (EXACT MOBILE PARITY: media_1795699919490_0ab77314.jpg) ── */}
           {showPostCallModal && (
             <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
+              <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95">
                 {/* Fixed Header */}
                 <div className="p-5 border-b border-slate-100 flex items-center justify-between shrink-0 bg-white">
                   <div className="flex items-center gap-2.5">
@@ -1106,6 +1299,361 @@ export default function VolunteerManagementAdminPage() {
                         );
                       })}
                     </div>
+                  </div>
+
+                  {/* Card 3: Recommended Skills & Talents (Matching mobile VolunteerScreen & AdminOpportunityEditor) */}
+                  <div className="p-5 bg-slate-50/60 border border-slate-200 rounded-2xl space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <Sparkles className="w-4 h-4 text-emerald-600" />
+                          Recommended Skills & Talents (Optional)
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Select or suggest specific gifts, abilities, and musical or technical skills needed:
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Selected Talents Summary Tray */}
+                    {callSkills.length > 0 && (
+                      <div className="p-3.5 bg-emerald-50/80 border border-emerald-200/80 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-800">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Selected Talents ({callSkills.length})</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setCallSkills([])}
+                            className="text-[11px] font-bold text-slate-500 hover:text-slate-800"
+                          >
+                            Clear all
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {callSkills.map((sk) => (
+                            <span
+                              key={sk}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-600 text-white shadow-xs"
+                            >
+                              <span>{sk}</span>
+                              <button
+                                type="button"
+                                onClick={() => toggleCallSkill(sk)}
+                                className="hover:bg-emerald-700 rounded-full p-0.5"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Category Filter Horizontal Scrollable Pills */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+                      {SKILL_CATEGORIES.map((cat) => {
+                        const isActive = activeSkillCategory === cat.id;
+                        return (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setActiveSkillCategory(cat.id)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
+                              isActive
+                                ? 'bg-emerald-50 border-emerald-500 text-emerald-800 ring-1 ring-emerald-500/20'
+                                : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                            }`}
+                          >
+                            <span>{cat.emoji}</span>
+                            <span>{cat.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Category Skills 2-Column Balanced Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {(SKILLS_BY_CATEGORY[activeSkillCategory] || []).map((sk) => {
+                        const isSelected = callSkills.includes(sk);
+                        return (
+                          <button
+                            key={sk}
+                            type="button"
+                            onClick={() => toggleCallSkill(sk)}
+                            className={`p-2.5 rounded-xl border text-left text-xs transition-all flex items-center justify-between ${
+                              isSelected
+                                ? 'bg-white border-emerald-500 text-emerald-900 font-bold ring-1 ring-emerald-500/20 shadow-xs'
+                                : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300 font-medium'
+                            }`}
+                          >
+                            <span className="truncate pr-2">{sk}</span>
+                            <div
+                              className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-colors ${
+                                isSelected
+                                  ? 'border-emerald-600 bg-emerald-600 text-white'
+                                  : 'border-slate-300 bg-white'
+                              }`}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Custom Skill Adder */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <input
+                        type="text"
+                        placeholder="Other skill or talent..."
+                        value={customSkill}
+                        onChange={(e) => setCustomSkill(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddCustomSkill();
+                          }
+                        }}
+                        className="flex-1 px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomSkill}
+                        disabled={!customSkill.trim()}
+                        className="px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl transition-all"
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Card 4: Schedule & Time Commitment (Matching mobile AdminOpportunityEditor) */}
+                  <div className="p-5 bg-slate-50/60 border border-slate-200 rounded-2xl space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-emerald-600" />
+                          Schedule & Time Commitment
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Define service gathering days, time slots, and expected volunteer commitment
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddScheduleSlot}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-800 shadow-xs transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+                        <span>Add Slot</span>
+                      </button>
+                    </div>
+
+                    {/* Schedule Slots */}
+                    <div className="space-y-3">
+                      {callSchedules.map((slot, sIdx) => (
+                        <div
+                          key={sIdx}
+                          className="p-4 bg-white border border-slate-200 rounded-xl space-y-3 relative shadow-xs"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                              Schedule Slot #{sIdx + 1}
+                            </span>
+                            {callSchedules.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveScheduleSlot(sIdx)}
+                                className="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+
+                          {/* Day Selection (7 Day Pills) */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                              Select Days
+                            </label>
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+                              {WEEKDAYS.map((day) => {
+                                const isSelected = slot.days.includes(day.full);
+                                return (
+                                  <button
+                                    key={day.full}
+                                    type="button"
+                                    onClick={() => handleToggleScheduleDay(sIdx, day.full)}
+                                    className={`w-9 h-9 rounded-xl text-xs font-bold transition-all border flex items-center justify-center ${
+                                      isSelected
+                                        ? 'bg-slate-900 border-slate-900 text-white font-extrabold shadow-xs'
+                                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+                                    }`}
+                                    title={day.name}
+                                  >
+                                    {day.full}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Time Range Pickers */}
+                          <div className="grid grid-cols-2 gap-3 pt-1">
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Start Time
+                              </label>
+                              <input
+                                type="time"
+                                value={slot.startTime}
+                                onChange={(e) => handleUpdateScheduleTime(sIdx, 'startTime', e.target.value)}
+                                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                End Time
+                              </label>
+                              <input
+                                type="time"
+                                value={slot.endTime}
+                                onChange={(e) => handleUpdateScheduleTime(sIdx, 'endTime', e.target.value)}
+                                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none font-semibold text-slate-800"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Slot Live Preview */}
+                          <div className="text-xs font-bold text-emerald-700 bg-emerald-50/60 px-3 py-1.5 rounded-lg border border-emerald-100 flex items-center gap-1.5">
+                            <Check className="w-3.5 h-3.5 text-emerald-600 stroke-[3]" />
+                            <span>{slot.days.join(', ')} – {slot.startTime} to {slot.endTime}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Overall Commitment Preset Pills */}
+                    <div className="pt-1">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+                        Time Commitment & Effort
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-2.5">
+                        {[
+                          '1-2 hrs / week',
+                          '2-3 hrs / service',
+                          '3-4 hrs / week',
+                          'Every Sunday Morning',
+                          'Monthly Service Drives',
+                          'Flexible / As Needed',
+                        ].map((preset) => {
+                          const isSel = timeCommitmentPreset === preset && !customCommitment.trim();
+                          return (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => {
+                                setTimeCommitmentPreset(preset);
+                                setCustomCommitment('');
+                              }}
+                              className={`py-2 px-3 text-xs font-bold rounded-xl border transition-all text-center ${
+                                isSel
+                                  ? 'border-emerald-600 text-emerald-700 bg-white shadow-xs ring-1 ring-emerald-600/30 font-extrabold'
+                                  : 'border-slate-200 text-slate-700 hover:border-slate-300 bg-white'
+                              }`}
+                            >
+                              {preset}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Custom Schedule Timing Summary Input */}
+                      <input
+                        type="text"
+                        placeholder="Or enter custom schedule timing summary (e.g. 2 hours on Sunday mornings & mid-week practice)"
+                        value={customCommitment}
+                        onChange={(e) => setCustomCommitment(e.target.value)}
+                        className="w-full px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none mb-2"
+                      />
+
+                      {/* Live Compiled Commitment Banner */}
+                      <div className="p-3 bg-slate-900 text-white rounded-xl text-xs flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-4 h-4 text-emerald-400" />
+                          <span className="font-semibold text-slate-300">Active Commitment:</span>
+                          <span className="font-bold text-emerald-300">{computedScheduleSummary}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 5: Key Responsibilities (Matching mobile AdminOpportunityEditor) */}
+                  <div className="p-5 bg-slate-50/60 border border-slate-200 rounded-2xl space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-emerald-600" />
+                          Key Responsibilities (Optional)
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          Clarify the core expectations and duties for this volunteer call:
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddResponsibility}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-800 shadow-xs transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-emerald-600 stroke-[2.5]" />
+                        <span>Add</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {responsibilities.map((resp, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            placeholder="e.g. Lead Sunday morning worship team, assist with sound mixing"
+                            value={resp}
+                            onChange={(e) => handleUpdateResponsibility(e.target.value, idx)}
+                            className="flex-1 px-3.5 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                          />
+                          {responsibilities.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveResponsibility(idx)}
+                              className="text-slate-400 hover:text-rose-600 p-2 rounded-lg transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Card 6: Prerequisites & Instructions (Optional) */}
+                  <div className="p-5 bg-slate-50/60 border border-slate-200 rounded-2xl space-y-3">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-emerald-600" />
+                        Prerequisites & Orientation Instructions (Optional)
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Specify any orientation dates, dress code, background checks, or spiritual prerequisites:
+                      </p>
+                    </div>
+                    <textarea
+                      rows={2}
+                      placeholder="e.g. Arrive 30 minutes before service in formal attire. Orientation session on Saturday at 4 PM in the main sanctuary."
+                      value={specialPrerequisites}
+                      onChange={(e) => setSpecialPrerequisites(e.target.value)}
+                      className="w-full px-3.5 py-2.5 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    />
                   </div>
                 </form>
 
