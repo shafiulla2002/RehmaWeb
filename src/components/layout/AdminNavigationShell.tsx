@@ -56,7 +56,7 @@ export interface AdminNavItem {
 
 export const WAVE7A_ADMIN_NAV = [
   { moduleId: 'M27', name: 'Admin Dashboard', href: '/admin', icon: LayoutDashboard },
-  { moduleId: 'M28', name: 'Daily Promises Studio', href: '/admin/promises', icon: Sparkles },
+  { moduleId: 'M28', name: 'Daily Promise & Schedule', href: '/admin/promises', icon: Sparkles },
   { moduleId: 'M29', name: 'Daily Verses (5,863)', href: '/admin/daily-verses', icon: BookOpen, superAdminOnly: true },
   { moduleId: 'M30', name: 'Sermons Manager', href: '/admin/sermons', icon: Video },
   { moduleId: 'M31', name: 'Songbook & Setlists', href: '/admin/songs', icon: Music },
@@ -137,7 +137,7 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
 
   const getAdminPageTitle = () => {
     if (pathname === '/admin') return 'M27 · Admin Dashboard';
-    if (pathname.startsWith('/admin/promises')) return 'M28 · Daily Promises & Thumbnail Studio';
+    if (pathname.startsWith('/admin/promises')) return 'M28 · Daily Promise & Schedule';
     if (pathname.startsWith('/admin/daily-verses')) return 'M29 · Super Admin Daily Verses Manager';
     if (pathname.startsWith('/admin/sermons')) return 'M30 · Sermons & Study Notes Manager';
     if (pathname.startsWith('/admin/songs')) return 'M31 · Worship Songbook & Setlist Builder';

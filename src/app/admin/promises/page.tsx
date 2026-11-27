@@ -78,7 +78,7 @@ export default function AdminPromisesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'library' | 'calendar' | 'thumbnail'>('library');
+  const [activeTab, setActiveTab] = useState<'library' | 'schedule' | 'thumbnail'>('library');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [toast, setToast] = useState<string | null>(null);
@@ -509,7 +509,7 @@ export default function AdminPromisesPage() {
                   <BookOpen size={20} />
                 </span>
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                  Admin Promises Studio
+                  Daily Promise & Schedule
                 </h1>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -552,6 +552,18 @@ export default function AdminPromisesPage() {
             >
               <BookOpen size={14} />
               <span>Promises Catalog ({promises.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('schedule')}
+              className={`pb-3 px-3 text-xs font-bold border-b-2 transition-all flex items-center gap-2 ${
+                activeTab === 'schedule'
+                  ? 'border-amber-500 text-amber-500'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              <Calendar size={14} />
+              <span>Schedule</span>
             </button>
             <button
               type="button"
@@ -715,7 +727,238 @@ export default function AdminPromisesPage() {
             </div>
           )}
 
-          {/* TAB 2: THUMBNAIL STUDIO */}
+          {/* TAB 2: SCHEDULE (Promise Calendar — matching mobile AdminPromiseCalendar) */}
+          {activeTab === 'schedule' && (() => {
+            const now = new Date();
+            const calYear = now.getFullYear();
+            const calMonth = now.getMonth();
+            const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
+            const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            const todayDate = now.getDate();
+            const calDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+            const totalGridCells = firstDayOfWeek + daysInMonth;
+            const trailingEmpty = totalGridCells % 7 === 0 ? 0 : 7 - (totalGridCells % 7);
+            const weekDayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+            const getMonthName = (m: number) => new Date(2000, m).toLocaleString('en-US', { month: 'long' });
+
+            return (
+              <div className="space-y-5">
+                {/* Calendar Header Card */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                    <div>
+                      <h2 className="text-lg font-bold text-slate-900 dark:text-white font-serif">
+                        Promise Calendar
+                      </h2>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {getMonthName(calMonth)} {calYear} — Tap any date to edit
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={loadPromises}
+                        disabled={loading}
+                        className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
+                        title="Refresh calendar data"
+                      >
+                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Calendar Grid */}
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {/* Week Day Headers */}
+                    {weekDayLabels.map((d) => (
+                      <div key={d} className="text-center py-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          {d}
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Empty cells for start of month */}
+                    {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+                      <div key={`empty-${i}`} className="aspect-square" />
+                    ))}
+
+                    {/* Day Cells */}
+                    {calDays.map((day) => {
+                      const isToday = day === todayDate;
+                      const dStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const promise = promises.find((p) => (p.scheduledDate || p.date) === dStr);
+                      const normStatus = promise ? String(promise.status || '').toLowerCase() : '';
+
+                      const isMissing = !promise;
+                      const isDraft = normStatus === 'draft';
+                      const isPublished = normStatus === 'published';
+                      const isScheduled = normStatus === 'scheduled';
+
+                      let cellBg = 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/60';
+                      let numColor = 'text-rose-800 dark:text-rose-300';
+                      let statusText = 'Missing';
+                      let statusColor = 'text-rose-600 dark:text-rose-400';
+
+                      if (isPublished || isScheduled) {
+                        cellBg = 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60';
+                        numColor = 'text-emerald-800 dark:text-emerald-300';
+                        statusText = isScheduled ? 'Sched.' : 'OK';
+                        statusColor = 'text-emerald-600 dark:text-emerald-400';
+                      } else if (isDraft) {
+                        cellBg = 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60';
+                        numColor = 'text-amber-800 dark:text-amber-300';
+                        statusText = 'Draft';
+                        statusColor = 'text-amber-600 dark:text-amber-400';
+                      }
+
+                      if (isToday) {
+                        cellBg = 'bg-amber-100 dark:bg-amber-900/40 border-amber-400 dark:border-amber-600 border-2 shadow-md shadow-amber-500/20';
+                      }
+
+                      return (
+                        <button
+                          key={day}
+                          type="button"
+                          onClick={() => {
+                            if (promise) {
+                              openEditModal(promise);
+                            } else {
+                              openCreateModal(dStr);
+                            }
+                          }}
+                          className={`aspect-square rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all hover:scale-105 hover:shadow-sm cursor-pointer ${cellBg}`}
+                          title={`${dStr} — ${statusText}`}
+                        >
+                          <span className={`text-sm font-bold ${isToday ? 'text-amber-900 dark:text-amber-200' : numColor}`}>
+                            {day}
+                          </span>
+                          <span className={`text-[7px] font-bold uppercase tracking-wider ${isToday ? 'text-amber-700 dark:text-amber-300' : statusColor}`}>
+                            {isToday ? 'Today' : statusText}
+                          </span>
+                        </button>
+                      );
+                    })}
+
+                    {/* Trailing empty cells */}
+                    {Array.from({ length: trailingEmpty }).map((_, i) => (
+                      <div key={`trail-${i}`} className="aspect-square" />
+                    ))}
+                  </div>
+                </div>
+
+                {/* Legend */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-wrap items-center gap-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded border bg-emerald-50 border-emerald-200" />
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Published / Scheduled</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded border bg-amber-50 border-amber-200" />
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Draft</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded border bg-rose-50 border-rose-200" />
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Missing</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 rounded border-2 bg-amber-100 border-amber-400" />
+                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Today</span>
+                  </div>
+                </div>
+
+                {/* Quick Stats */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
+                    <div className="text-2xl font-black text-emerald-600">{promises.filter(p => String(p.status || '').toLowerCase() === 'published').length}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Published</div>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
+                    <div className="text-2xl font-black text-blue-600">{promises.filter(p => String(p.status || '').toLowerCase() === 'scheduled').length}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Scheduled</div>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
+                    <div className="text-2xl font-black text-amber-600">{promises.filter(p => String(p.status || '').toLowerCase() === 'draft').length}</div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Drafts</div>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
+                    <div className="text-2xl font-black text-rose-600">
+                      {(() => {
+                        const existingDates = new Set(promises.map(p => p.scheduledDate || p.date));
+                        let missing = 0;
+                        for (let d = 1; d <= daysInMonth; d++) {
+                          const ds = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                          if (!existingDates.has(ds)) missing++;
+                        }
+                        return missing;
+                      })()}
+                    </div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Missing</div>
+                  </div>
+                </div>
+
+                {/* Today's Promise Card */}
+                {(() => {
+                  const todayStr = getTodayDateStr();
+                  const todayPromise = promises.find(p => (p.scheduledDate || p.date) === todayStr);
+                  if (todayPromise) {
+                    return (
+                      <div className="bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-2xl p-5 space-y-2 shadow-sm">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-extrabold uppercase tracking-wider">
+                            Today&apos;s Promise
+                          </span>
+                          <span className="text-[11px] text-slate-400">{todayStr}</span>
+                        </div>
+                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                          {todayPromise.verseReferenceEn} {todayPromise.verseReferenceTe ? `(${todayPromise.verseReferenceTe})` : ''}
+                        </h3>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 font-serif italic line-clamp-2">
+                          &ldquo;{todayPromise.verse}&rdquo;
+                        </p>
+                        {todayPromise.verseTelugu && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-serif line-clamp-1">
+                            {todayPromise.verseTelugu}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(todayPromise)}
+                          className="mt-2 px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                        >
+                          <Edit3 size={12} />
+                          <span>Edit Today&apos;s Promise</span>
+                        </button>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 rounded-2xl p-5 space-y-2 shadow-sm text-center">
+                        <div className="inline-flex p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-500 border border-rose-200 dark:border-rose-800">
+                          <AlertCircle size={20} />
+                        </div>
+                        <div className="text-sm font-bold text-slate-900 dark:text-white">No Promise Scheduled</div>
+                        <p className="text-xs text-slate-500">
+                          Today ({todayStr}) has no daily promise. Tap below to schedule one.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => openCreateModal(todayStr)}
+                          className="mt-2 px-5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                        >
+                          <Plus size={14} />
+                          <span>Schedule today&apos;s promise</span>
+                        </button>
+                      </div>
+                    );
+                  }
+                })()}
+              </div>
+            );
+          })()}
+
+          {/* TAB 3: THUMBNAIL STUDIO */}
           {activeTab === 'thumbnail' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Controls */}
