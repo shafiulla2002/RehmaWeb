@@ -42,6 +42,7 @@ import {
   ChevronDown,
   ChevronUp,
   Crown,
+  Bell,
 } from 'lucide-react';
 
 export interface AdminNavItem {
@@ -466,7 +467,7 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
         {/* Top Admin Header */}
         <header className="sticky top-0 z-20 bg-[#F7F5EE]/95 dark:bg-[#0D141D]/95 backdrop-blur-md border-b border-[#EBE6DC] dark:border-[#222F3E] px-4 sm:px-6 py-2.5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            {/* Left: Mobile Trigger & Breadcrumb */}
+            {/* Left: Mobile Trigger & Brand Title / Breadcrumb */}
             <div className="flex items-center gap-2.5 min-w-0">
               <button
                 type="button"
@@ -477,21 +478,37 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
                 <Menu size={20} />
               </button>
 
-              <div className="text-xs font-medium text-[#5C665F] dark:text-slate-400 truncate">
-                <Link href="/admin" className="hover:text-[#1E6F43] font-semibold">
-                  Admin Console
-                </Link>
-                <span className="mx-1.5">/</span>
-                <span className="font-bold text-[#18221B] dark:text-white">
-                  {getAdminPageTitle()}
-                </span>
-              </div>
+              {pathname === '/admin' ? (
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 border border-amber-400/40 flex items-center justify-center text-[#E5C158] shrink-0">
+                    <Crown size={17} />
+                  </div>
+                  <div>
+                    <h1 className="font-serif font-bold text-base text-[#18221B] dark:text-white leading-tight">
+                      Rhema Ministry Operations
+                    </h1>
+                    <p className="text-[10px] text-[#5C665F] dark:text-slate-400 font-medium">
+                      Complete Church Administration &amp; Ministry Management
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs font-medium text-[#5C665F] dark:text-slate-400 truncate">
+                  <Link href="/admin" className="hover:text-[#1E6F43] font-semibold">
+                    Admin Console
+                  </Link>
+                  <span className="mx-1.5">/</span>
+                  <span className="font-bold text-[#18221B] dark:text-white">
+                    {getAdminPageTitle()}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Right Controls */}
-            <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex items-center gap-2.5 flex-wrap justify-end">
               {/* Branch Impersonation / Context Switcher (Demo) */}
-              <div className="flex items-center gap-1.5 bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] rounded-full px-2.5 py-1 text-xs shadow-xs">
+              <div className="flex items-center gap-1.5 bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] rounded-full px-3 py-1 text-xs shadow-xs">
                 <Building2 size={13} className="text-[#C89D35] shrink-0" />
                 {isSuperAdmin ? (
                   <select
@@ -518,7 +535,7 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
                 aria-label="Select language"
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as any)}
-                className="bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] rounded-full px-2.5 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs focus:outline-hidden cursor-pointer"
+                className="bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] rounded-full px-3 py-1 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-xs focus:outline-hidden cursor-pointer"
               >
                 {availableLanguages.map((l) => (
                   <option key={l.code} value={l.code} className="text-slate-900">
@@ -537,33 +554,59 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
                 {theme === 'light' ? <Sun size={15} className="text-amber-500" /> : <Moon size={15} />}
               </button>
 
-              {/* Member Portal Switcher */}
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0B192C] text-white text-xs font-semibold hover:bg-[#132A4A] transition-colors shadow-xs"
+              {/* Notifications Bell */}
+              <div className="relative">
+                <button
+                  type="button"
+                  title="Notifications"
+                  className="p-1.5 rounded-full bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] text-slate-600 dark:text-slate-300 hover:bg-[#E8F3EC] transition-colors shadow-xs relative"
+                >
+                  <Bell size={15} />
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-rose-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
+                    1
+                  </span>
+                </button>
+              </div>
+
+              {/* User Avatar Circle */}
+              <div
+                title={profile?.fullName || 'Super Admin (SK)'}
+                className="w-8 h-8 rounded-full bg-[#0B192C] text-[#E5C158] border border-amber-400/40 flex items-center justify-center text-xs font-bold font-serif shadow-xs select-none"
               >
-                <ArrowLeft size={13} className="text-[#E5C158]" />
-                <span className="hidden sm:inline">Member View</span>
-              </Link>
+                SK
+              </div>
+
+              {/* Member Portal Switcher (Secondary when not on admin overview) */}
+              {pathname !== '/admin' && (
+                <Link
+                  href="/dashboard"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0B192C] text-white text-xs font-semibold hover:bg-[#132A4A] transition-colors shadow-xs"
+                >
+                  <ArrowLeft size={13} className="text-[#E5C158]" />
+                  <span className="hidden sm:inline">Member View</span>
+                </Link>
+              )}
             </div>
           </div>
         </header>
 
-        {/* Live Firebase Cloud Architecture Context Bar */}
-        <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200/80 dark:border-emerald-800/50 px-4 sm:px-6 py-2 text-[11px] text-emerald-950 dark:text-emerald-200 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
-            <span>
-              <strong>Firebase Live Production Mode:</strong> Connected directly to Firestore canonical church collections. Real-time synchronizations and administrator privileges active.
+        {/* Live Firebase Cloud Architecture Context Bar - hidden on /admin to match exact overview layout */}
+        {pathname !== '/admin' && (
+          <div className="bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200/80 dark:border-emerald-800/50 px-4 sm:px-6 py-2 text-[11px] text-emerald-950 dark:text-emerald-200 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <span>
+                <strong>Firebase Live Production Mode:</strong> Connected directly to Firestore canonical church collections. Real-time synchronizations and administrator privileges active.
+              </span>
+            </div>
+            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-900/60 font-bold">
+              Active Context: {activeBranch.city} · {profile?.fullName || 'Admin User'}
             </span>
           </div>
-          <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-200/60 dark:bg-emerald-900/60 font-bold">
-            Active Context: {activeBranch.city} · {profile?.fullName || 'Admin User'}
-          </span>
-        </div>
+        )}
 
         {/* Main Workspace Content */}
-        <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">{children}</main>
+        <main className={`flex-1 ${pathname === '/admin' ? 'p-3.5 sm:p-5 max-w-[1640px]' : 'p-4 sm:p-6 max-w-7xl'} w-full mx-auto`}>{children}</main>
 
         {/* Footer */}
         <footer className="border-t border-[#EBE6DC] dark:border-[#222F3E] px-4 sm:px-6 py-3 text-center text-[11px] text-[#5C665F] dark:text-slate-400">
