@@ -381,79 +381,72 @@ export default function AdminDashboardPage() {
       <AdminNavigationShell>
         <div className="space-y-4">
           {/* ========================================================= */}
-          {/* 1. WELCOME HERO BANNER (Pixel-Perfect from Shared Image)   */}
+          {/* 1. WELCOME HERO BANNER (Exact HD match from user image)     */}
           {/* ========================================================= */}
           <div
-            className="relative overflow-hidden rounded-2xl md:rounded-3xl shadow-sm border border-[#E5E0D8] dark:border-slate-800"
+            className="relative overflow-hidden rounded-2xl shadow-md border border-white/10 dark:border-white/10"
             style={{
-              backgroundImage: `url('/admin-hero-banner.jpg')`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center 35%',
-              backgroundRepeat: 'no-repeat',
+              background: `linear-gradient(to right, rgba(6, 16, 29, 0.96) 0%, rgba(6, 16, 29, 0.85) 28%, rgba(6, 16, 29, 0.35) 42%, transparent 55%), linear-gradient(to left, rgba(6, 16, 29, 0.70) 0%, rgba(6, 16, 29, 0.20) 15%, transparent 26%), url('/admin-hero-banner.jpg') no-repeat 56% 36% / cover`,
             }}
           >
-            {/* Smooth gradient on left for crisp readability; transparent on right for golden sun and cross */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#071424]/92 via-[#0B1E34]/80 via-40% to-transparent pointer-events-none" />
-
-            <div className="relative z-10 px-6 py-5 md:px-8 md:py-6 flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="relative z-10 px-5 py-3.5 sm:px-7 sm:py-4 md:py-4.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
               {/* Left Welcome Content */}
-              <div className="space-y-2 max-w-xl">
-                <div className="font-serif italic text-[#F5D77F] text-base md:text-lg font-normal tracking-wide">
+              <div className="space-y-1.5 max-w-xl">
+                <div className="font-serif italic text-white text-base md:text-lg font-normal tracking-wide">
                   Welcome Back,
                 </div>
 
-                <h1 className="text-2xl md:text-3xl font-serif font-extrabold text-white tracking-tight flex items-center gap-2">
-                  <span>Rhema Admin</span>
-                  <span className="text-xl md:text-2xl" role="img" aria-label="crown">
-                    👑
+                <h1 className="text-2xl md:text-[27px] font-serif font-extrabold text-white tracking-tight flex items-center gap-2">
+                  <span>Rhema Ministry Admin</span>
+                  <span className="text-xl md:text-2xl" role="img" aria-label="waving hand">
+                    👋
                   </span>
                 </h1>
 
-                <p className="text-slate-200/90 text-xs md:text-sm font-normal leading-relaxed max-w-lg">
-                  Manage people, services, ministry content and church operations from one place.
+                <p className="text-slate-200/90 text-xs md:text-[13px] font-normal leading-relaxed max-w-lg">
+                  Manage your church, people, ministries, and operations — all in one place.
                 </p>
 
-                <div className="pt-2 flex flex-wrap items-center gap-2.5">
-                  {/* Live Synchronized Pill */}
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0E3E26]/90 border border-emerald-400/30 text-emerald-300 text-[11px] font-semibold">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    <span>Live Firebase Synchronized</span>
+                <div className="pt-1.5 flex flex-wrap items-center gap-2">
+                  {/* Badge 1: Live Firestore Synchronized */}
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0B3A23]/90 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold shadow-xs">
+                    <Sparkles size={11} className="text-emerald-400" />
+                    <span>Live Firestore Synchronized</span>
                   </span>
 
-                  {/* Last Sync Pill */}
+                  {/* Badge 2: Role: SUPERADMIN */}
+                  <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#162130]/90 border border-amber-400/40 text-amber-300 text-[11px] font-extrabold uppercase tracking-wider shadow-xs">
+                    Role: {role ? role.toUpperCase() : 'SUPERADMIN'}
+                  </span>
+
+                  {/* Badge 3: Last Sync Pill */}
                   <button
                     type="button"
                     onClick={handleRefresh}
                     title="Click to refresh live church data"
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#11243B]/80 border border-white/15 text-slate-200 text-[11px] font-medium hover:border-amber-400/40 cursor-pointer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#132235]/80 border border-white/15 text-slate-200 text-[11px] font-medium hover:border-amber-400/40 cursor-pointer transition-colors"
                   >
                     <RefreshCw
                       size={11}
-                      className={`text-amber-300 ${isRefreshing ? 'animate-spin' : ''}`}
+                      className={`text-slate-300 ${isRefreshing ? 'animate-spin' : ''}`}
                     />
                     <span>Last Sync: {lastSyncTime}</span>
                   </button>
-
-                  {/* Member View Shortcut */}
-                  <Link
-                    href="/dashboard"
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-amber-200 text-[11px] font-semibold backdrop-blur-xs transition-colors hover:border-amber-400/40"
-                  >
-                    <ArrowLeft size={11} className="text-[#E5C158]" />
-                    <span>Member View</span>
-                  </Link>
                 </div>
               </div>
 
-              {/* Right Inspirational Scripture (Floating gracefully on the sky without black box) */}
+              {/* Right Inspirational Scripture (Exact match to cropped banner) */}
               <div className="text-right space-y-1.5 max-w-xs sm:max-w-sm drop-shadow-md">
-                <p className="font-serif italic text-white/95 text-xs sm:text-sm md:text-[15px] leading-snug">
-                  &ldquo;Commit to the LORD whatever you do,
-                  <br className="hidden sm:inline" />
-                  and He will establish your plans.&rdquo;
-                </p>
+                <div className="flex items-start justify-end gap-1.5 text-white/95 font-serif italic text-xs md:text-[13.5px] leading-snug">
+                  <span className="text-[#F5D77F] font-serif text-xl md:text-2xl leading-none select-none -mt-1">&ldquo;</span>
+                  <p>
+                    &ldquo;Commit to the LORD whatever you do,
+                    <br className="hidden sm:inline" />
+                    and He will establish your plans.&rdquo;
+                  </p>
+                </div>
                 <div className="flex justify-end pt-0.5">
-                  <span className="px-3 py-0.5 rounded-full bg-[#E5C158] text-[#0B192C] text-[11px] font-bold font-sans tracking-wide shadow-xs">
+                  <span className="px-2.5 py-0.5 rounded-md bg-[#FDE047] text-[#1E1B18] text-[11px] font-extrabold font-sans tracking-wide shadow-xs">
                     Proverbs 16:3
                   </span>
                 </div>
