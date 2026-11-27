@@ -384,15 +384,18 @@ export default function AdminDashboardPage() {
           {/* 1. WELCOME HERO BANNER (Exact HD match from user image)     */}
           {/* ========================================================= */}
           <div
-            className="relative overflow-hidden rounded-2xl shadow-md border border-white/10 dark:border-white/10"
+            className="relative overflow-hidden rounded-2xl shadow-lg border border-white/10 dark:border-white/10 min-h-[135px] max-h-[160px] flex items-center"
             style={{
-              background: `linear-gradient(to right, rgba(6, 16, 29, 0.96) 0%, rgba(6, 16, 29, 0.85) 28%, rgba(6, 16, 29, 0.35) 42%, transparent 55%), linear-gradient(to left, rgba(6, 16, 29, 0.70) 0%, rgba(6, 16, 29, 0.20) 15%, transparent 26%), url('/admin-hero-banner.jpg') no-repeat 56% 36% / cover`,
+              backgroundImage: `url('/admin-hero-banner.jpg')`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center center',
+              backgroundRepeat: 'no-repeat',
             }}
           >
-            <div className="relative z-10 px-5 py-3.5 sm:px-7 sm:py-4 md:py-4.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="relative z-10 px-6 py-3.5 sm:px-8 sm:py-4 md:py-4.5 w-full flex flex-col md:flex-row md:items-center justify-between gap-4">
               {/* Left Welcome Content */}
               <div className="space-y-1.5 max-w-xl">
-                <div className="font-serif italic text-white text-base md:text-lg font-normal tracking-wide">
+                <div className="font-serif italic text-amber-100/90 text-sm md:text-base font-normal tracking-wide">
                   Welcome Back,
                 </div>
 
@@ -409,7 +412,7 @@ export default function AdminDashboardPage() {
 
                 <div className="pt-1.5 flex flex-wrap items-center gap-2">
                   {/* Badge 1: Live Firestore Synchronized */}
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0B3A23]/90 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold shadow-xs">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#0B3A23]/90 border border-emerald-500/50 text-emerald-300 text-[11px] font-bold shadow-xs">
                     <Sparkles size={11} className="text-emerald-400" />
                     <span>Live Firestore Synchronized</span>
                   </span>
@@ -435,12 +438,12 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
-              {/* Right Inspirational Scripture (Exact match to cropped banner) */}
+              {/* Right Inspirational Scripture (Exact match to user screenshot) */}
               <div className="text-right space-y-1.5 max-w-xs sm:max-w-sm drop-shadow-md">
-                <div className="flex items-start justify-end gap-1.5 text-white/95 font-serif italic text-xs md:text-[13.5px] leading-snug">
-                  <span className="text-[#F5D77F] font-serif text-xl md:text-2xl leading-none select-none -mt-1">&ldquo;</span>
+                <div className="flex items-start justify-end gap-1 text-white/95 font-serif italic text-xs md:text-[13.5px] leading-snug">
+                  <span className="text-[#F5D77F] font-serif text-2xl md:text-3xl leading-none select-none -mt-1 mr-0.5">&ldquo;</span>
                   <p>
-                    &ldquo;Commit to the LORD whatever you do,
+                    Commit to the LORD whatever you do,
                     <br className="hidden sm:inline" />
                     and He will establish your plans.&rdquo;
                   </p>
