@@ -43,6 +43,8 @@ import {
   Check,
   ChevronDown,
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
   Image as ImageIcon,
 } from 'lucide-react';
 
@@ -79,6 +81,7 @@ export default function AdminPromisesPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<'library' | 'schedule' | 'thumbnail'>('library');
+  const [calDate, setCalDate] = useState(() => new Date());
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('All');
   const [toast, setToast] = useState<string | null>(null);
@@ -729,12 +732,13 @@ export default function AdminPromisesPage() {
 
           {/* TAB 2: SCHEDULE (Promise Calendar — matching mobile AdminPromiseCalendar) */}
           {activeTab === 'schedule' && (() => {
-            const now = new Date();
-            const calYear = now.getFullYear();
-            const calMonth = now.getMonth();
+            const calYear = calDate.getFullYear();
+            const calMonth = calDate.getMonth();
             const firstDayOfWeek = new Date(calYear, calMonth, 1).getDay();
             const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-            const todayDate = now.getDate();
+            const now = new Date();
+            const isCurrentMonth = now.getFullYear() === calYear && now.getMonth() === calMonth;
+            const todayDate = isCurrentMonth ? now.getDate() : -1;
             const calDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
             const totalGridCells = firstDayOfWeek + daysInMonth;
             const trailingEmpty = totalGridCells % 7 === 0 ? 0 : 7 - (totalGridCells % 7);
@@ -742,46 +746,228 @@ export default function AdminPromisesPage() {
 
             const getMonthName = (m: number) => new Date(2000, m).toLocaleString('en-US', { month: 'long' });
 
+            const publishedCount = promises.filter(p => String(p.status || '').toLowerCase() === 'published').length;
+            const scheduledCount = promises.filter(p => String(p.status || '').toLowerCase() === 'scheduled').length;
+            const draftCount = promises.filter(p => String(p.status || '').toLowerCase() === 'draft').length;
+
+            const existingDates = new Set(promises.map(p => p.scheduledDate || p.date));
+            let missingInMonth = 0;
+            for (let d = 1; d <= daysInMonth; d++) {
+              const ds = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+              if (!existingDates.has(ds)) missingInMonth++;
+            }
+
+            const todayStr = getTodayDateStr();
+            const todayPromise = promises.find(p => (p.scheduledDate || p.date) === todayStr);
+
             return (
-              <div className="space-y-5">
-                {/* Calendar Header Card */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm">
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-                    <div>
-                      <h2 className="text-lg font-bold text-slate-900 dark:text-white font-serif">
-                        Promise Calendar
-                      </h2>
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {getMonthName(calMonth)} {calYear} — Tap any date to edit
-                      </p>
+              <div className="space-y-4">
+                {/* 1. TOP STATS CARDS ("make them in up") */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  {/* Published */}
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/80 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                      <CheckCircle2 size={18} />
                     </div>
+                    <div>
+                      <div className="text-xl font-black text-slate-900 dark:text-white leading-tight">
+                        {publishedCount}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                        Published
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Scheduled */}
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/80 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                      <Calendar size={18} />
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-slate-900 dark:text-white leading-tight">
+                        {scheduledCount}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                        Scheduled
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Drafts */}
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800/80 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0">
+                      <Clock size={18} />
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-slate-900 dark:text-white leading-tight">
+                        {draftCount}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                        Drafts
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Missing in Month */}
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-3.5 flex items-center gap-3 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/80 flex items-center justify-center text-rose-600 dark:text-rose-400 shrink-0">
+                      <AlertCircle size={18} />
+                    </div>
+                    <div>
+                      <div className="text-xl font-black text-slate-900 dark:text-white leading-tight">
+                        {missingInMonth}
+                      </div>
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400">
+                        Missing ({getMonthName(calMonth).slice(0, 3)})
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. TODAY'S PROMISE COMPACT HIGHLIGHT BAR */}
+                {todayPromise ? (
+                  <div className="bg-gradient-to-r from-amber-50/90 via-white to-amber-50/50 dark:from-amber-950/30 dark:via-slate-900 dark:to-amber-950/20 border border-amber-200/80 dark:border-amber-800/60 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-start sm:items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 flex items-center justify-center shrink-0 text-sm font-bold">
+                        ★
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/70 text-amber-800 dark:text-amber-200 text-[10px] font-black uppercase tracking-wider">
+                            Today&apos;s Promise
+                          </span>
+                          <span className="text-xs font-semibold text-slate-500">{todayStr}</span>
+                          <span className="text-xs font-bold text-slate-900 dark:text-white">
+                            {todayPromise.verseReferenceEn} {todayPromise.verseReferenceTe ? `(${todayPromise.verseReferenceTe})` : ''}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400 italic line-clamp-1 mt-0.5 font-serif">
+                          &ldquo;{todayPromise.verse}&rdquo;
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openEditModal(todayPromise)}
+                      className="shrink-0 px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity"
+                    >
+                      <Edit3 size={12} />
+                      <span>Edit Today</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-gradient-to-r from-rose-50/80 via-white to-amber-50/60 dark:from-rose-950/20 dark:via-slate-900 dark:to-amber-950/20 border border-rose-200/70 dark:border-rose-900/40 rounded-2xl p-3.5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-xl bg-rose-100 dark:bg-rose-900/50 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                        <AlertCircle size={18} />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>No Promise Scheduled for Today ({todayStr})</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          Keep your church community spiritually nourished by scheduling today&apos;s Scripture.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => openCreateModal(todayStr)}
+                      className="shrink-0 px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Plus size={13} />
+                      <span>Schedule Today</span>
+                    </button>
+                  </div>
+                )}
+
+                {/* 3. CALENDAR CARD (Compact, Premium look) */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
+                  {/* Calendar Top Controls & Inline Legend */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-800">
+                    {/* Month Title & Nav */}
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCalDate(new Date(calYear, calMonth - 1, 1))}
+                        className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
+                        title="Previous Month"
+                      >
+                        <ChevronLeft size={16} />
+                      </button>
+                      <div className="min-w-[160px] text-center">
+                        <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white font-serif tracking-tight">
+                          {getMonthName(calMonth)} {calYear}
+                        </h2>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCalDate(new Date(calYear, calMonth + 1, 1))}
+                        className="p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
+                        title="Next Month"
+                      >
+                        <ChevronRight size={16} />
+                      </button>
+                      {!isCurrentMonth && (
+                        <button
+                          type="button"
+                          onClick={() => setCalDate(new Date())}
+                          className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors"
+                        >
+                          Today
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Integrated Legend & Refresh */}
+                    <div className="flex items-center flex-wrap gap-2.5 sm:gap-3 text-[11px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Published</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Draft</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-rose-400 inline-block" />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Missing</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-300 inline-block" />
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">Today</span>
+                      </div>
+                      <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block" />
                       <button
                         type="button"
                         onClick={loadPromises}
                         disabled={loading}
-                        className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
-                        title="Refresh calendar data"
+                        className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 transition-colors"
+                        title="Refresh calendar"
                       >
-                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                        <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
                       </button>
                     </div>
                   </div>
 
-                  {/* Calendar Grid */}
-                  <div className="grid grid-cols-7 gap-1.5">
-                    {/* Week Day Headers */}
+                  {/* Calendar Grid (Compact & Premium — height: 52px matching mobile) */}
+                  <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+                    {/* Weekday headers */}
                     {weekDayLabels.map((d) => (
-                      <div key={d} className="text-center py-2">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      <div key={d} className="text-center py-1.5 bg-slate-50 dark:bg-slate-800/40 rounded-lg">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                           {d}
                         </span>
                       </div>
                     ))}
 
-                    {/* Empty cells for start of month */}
+                    {/* Empty leading cells */}
                     {Array.from({ length: firstDayOfWeek }).map((_, i) => (
-                      <div key={`empty-${i}`} className="aspect-square" />
+                      <div
+                        key={`empty-${i}`}
+                        className="h-13 sm:h-14 rounded-xl bg-slate-50/40 dark:bg-slate-900/20 border border-dashed border-slate-200/50 dark:border-slate-800/40"
+                      />
                     ))}
 
                     {/* Day Cells */}
@@ -793,28 +979,29 @@ export default function AdminPromisesPage() {
 
                       const isMissing = !promise;
                       const isDraft = normStatus === 'draft';
-                      const isPublished = normStatus === 'published';
-                      const isScheduled = normStatus === 'scheduled';
+                      const isPublished = normStatus === 'published' || normStatus === 'scheduled';
 
-                      let cellBg = 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800/60';
-                      let numColor = 'text-rose-800 dark:text-rose-300';
+                      let cellBg = 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200/70 dark:border-rose-900/40 hover:border-rose-400 hover:bg-rose-100/50';
+                      let numColor = 'text-rose-900 dark:text-rose-200';
+                      let badgeBg = 'bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300';
                       let statusText = 'Missing';
-                      let statusColor = 'text-rose-600 dark:text-rose-400';
 
-                      if (isPublished || isScheduled) {
-                        cellBg = 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/60';
-                        numColor = 'text-emerald-800 dark:text-emerald-300';
-                        statusText = isScheduled ? 'Sched.' : 'OK';
-                        statusColor = 'text-emerald-600 dark:text-emerald-400';
+                      if (isPublished) {
+                        cellBg = 'bg-emerald-50/70 dark:bg-emerald-950/25 border-emerald-200/80 dark:border-emerald-800/50 hover:border-emerald-400 hover:bg-emerald-100/50';
+                        numColor = 'text-emerald-900 dark:text-emerald-200';
+                        badgeBg = 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300';
+                        statusText = normStatus === 'scheduled' ? 'Sched.' : 'OK';
                       } else if (isDraft) {
-                        cellBg = 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60';
-                        numColor = 'text-amber-800 dark:text-amber-300';
+                        cellBg = 'bg-amber-50/70 dark:bg-amber-950/25 border-amber-200/80 dark:border-amber-800/50 hover:border-amber-400 hover:bg-amber-100/50';
+                        numColor = 'text-amber-900 dark:text-amber-200';
+                        badgeBg = 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300';
                         statusText = 'Draft';
-                        statusColor = 'text-amber-600 dark:text-amber-400';
                       }
 
                       if (isToday) {
-                        cellBg = 'bg-amber-100 dark:bg-amber-900/40 border-amber-400 dark:border-amber-600 border-2 shadow-md shadow-amber-500/20';
+                        cellBg = 'bg-gradient-to-br from-amber-50 via-white to-amber-100/80 dark:from-amber-950/50 dark:to-slate-900 border-2 border-amber-400 shadow-md shadow-amber-500/20';
+                        badgeBg = 'bg-amber-500 text-white';
+                        statusText = 'Today';
                       }
 
                       return (
@@ -828,14 +1015,14 @@ export default function AdminPromisesPage() {
                               openCreateModal(dStr);
                             }
                           }}
-                          className={`aspect-square rounded-xl border flex flex-col items-center justify-center gap-0.5 transition-all hover:scale-105 hover:shadow-sm cursor-pointer ${cellBg}`}
-                          title={`${dStr} — ${statusText}`}
+                          className={`h-13 sm:h-14 rounded-xl border flex flex-col items-center justify-between py-1.5 px-1 transition-all duration-150 hover:scale-[1.04] hover:shadow-md cursor-pointer ${cellBg}`}
+                          title={`${dStr} — ${promise?.verseReferenceEn || statusText}`}
                         >
-                          <span className={`text-sm font-bold ${isToday ? 'text-amber-900 dark:text-amber-200' : numColor}`}>
+                          <span className={`text-xs sm:text-sm font-black leading-none ${isToday ? 'text-amber-950 dark:text-amber-100' : numColor}`}>
                             {day}
                           </span>
-                          <span className={`text-[7px] font-bold uppercase tracking-wider ${isToday ? 'text-amber-700 dark:text-amber-300' : statusColor}`}>
-                            {isToday ? 'Today' : statusText}
+                          <span className={`text-[7px] sm:text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded leading-none ${badgeBg}`}>
+                            {statusText}
                           </span>
                         </button>
                       );
@@ -843,117 +1030,13 @@ export default function AdminPromisesPage() {
 
                     {/* Trailing empty cells */}
                     {Array.from({ length: trailingEmpty }).map((_, i) => (
-                      <div key={`trail-${i}`} className="aspect-square" />
+                      <div
+                        key={`trail-${i}`}
+                        className="h-13 sm:h-14 rounded-xl bg-slate-50/40 dark:bg-slate-900/20 border border-dashed border-slate-200/50 dark:border-slate-800/40"
+                      />
                     ))}
                   </div>
                 </div>
-
-                {/* Legend */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-wrap items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border bg-emerald-50 border-emerald-200" />
-                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Published / Scheduled</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border bg-amber-50 border-amber-200" />
-                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Draft</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border bg-rose-50 border-rose-200" />
-                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Missing</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 rounded border-2 bg-amber-100 border-amber-400" />
-                    <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300">Today</span>
-                  </div>
-                </div>
-
-                {/* Quick Stats */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
-                    <div className="text-2xl font-black text-emerald-600">{promises.filter(p => String(p.status || '').toLowerCase() === 'published').length}</div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Published</div>
-                  </div>
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
-                    <div className="text-2xl font-black text-blue-600">{promises.filter(p => String(p.status || '').toLowerCase() === 'scheduled').length}</div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Scheduled</div>
-                  </div>
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
-                    <div className="text-2xl font-black text-amber-600">{promises.filter(p => String(p.status || '').toLowerCase() === 'draft').length}</div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Drafts</div>
-                  </div>
-                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 text-center">
-                    <div className="text-2xl font-black text-rose-600">
-                      {(() => {
-                        const existingDates = new Set(promises.map(p => p.scheduledDate || p.date));
-                        let missing = 0;
-                        for (let d = 1; d <= daysInMonth; d++) {
-                          const ds = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                          if (!existingDates.has(ds)) missing++;
-                        }
-                        return missing;
-                      })()}
-                    </div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mt-1">Missing</div>
-                  </div>
-                </div>
-
-                {/* Today's Promise Card */}
-                {(() => {
-                  const todayStr = getTodayDateStr();
-                  const todayPromise = promises.find(p => (p.scheduledDate || p.date) === todayStr);
-                  if (todayPromise) {
-                    return (
-                      <div className="bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 rounded-2xl p-5 space-y-2 shadow-sm">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[10px] font-extrabold uppercase tracking-wider">
-                            Today&apos;s Promise
-                          </span>
-                          <span className="text-[11px] text-slate-400">{todayStr}</span>
-                        </div>
-                        <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                          {todayPromise.verseReferenceEn} {todayPromise.verseReferenceTe ? `(${todayPromise.verseReferenceTe})` : ''}
-                        </h3>
-                        <p className="text-xs text-slate-600 dark:text-slate-400 font-serif italic line-clamp-2">
-                          &ldquo;{todayPromise.verse}&rdquo;
-                        </p>
-                        {todayPromise.verseTelugu && (
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-serif line-clamp-1">
-                            {todayPromise.verseTelugu}
-                          </p>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(todayPromise)}
-                          className="mt-2 px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity"
-                        >
-                          <Edit3 size={12} />
-                          <span>Edit Today&apos;s Promise</span>
-                        </button>
-                      </div>
-                    );
-                  } else {
-                    return (
-                      <div className="bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-800 rounded-2xl p-5 space-y-2 shadow-sm text-center">
-                        <div className="inline-flex p-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-500 border border-rose-200 dark:border-rose-800">
-                          <AlertCircle size={20} />
-                        </div>
-                        <div className="text-sm font-bold text-slate-900 dark:text-white">No Promise Scheduled</div>
-                        <p className="text-xs text-slate-500">
-                          Today ({todayStr}) has no daily promise. Tap below to schedule one.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => openCreateModal(todayStr)}
-                          className="mt-2 px-5 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold inline-flex items-center gap-1.5 hover:opacity-90 transition-opacity"
-                        >
-                          <Plus size={14} />
-                          <span>Schedule today&apos;s promise</span>
-                        </button>
-                      </div>
-                    );
-                  }
-                })()}
               </div>
             );
           })()}
