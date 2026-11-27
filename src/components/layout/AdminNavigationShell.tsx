@@ -576,16 +576,14 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
                 SK
               </div>
 
-              {/* Member Portal Switcher (Secondary when not on admin overview) */}
-              {pathname !== '/admin' && (
-                <Link
-                  href="/dashboard"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0B192C] text-white text-xs font-semibold hover:bg-[#132A4A] transition-colors shadow-xs"
-                >
-                  <ArrowLeft size={13} className="text-[#E5C158]" />
-                  <span className="hidden sm:inline">Member View</span>
-                </Link>
-              )}
+              {/* Member Portal Switcher */}
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#0B192C] text-white text-xs font-semibold hover:bg-[#132A4A] transition-colors shadow-xs shrink-0"
+              >
+                <ArrowLeft size={13} className="text-[#E5C158]" />
+                <span>Member View</span>
+              </Link>
             </div>
           </div>
         </header>

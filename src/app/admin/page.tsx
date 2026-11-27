@@ -39,6 +39,7 @@ import {
   Navigation,
   Droplets,
   Zap,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface ActivityItem {
@@ -88,6 +89,11 @@ export default function AdminDashboardPage() {
   const [dailyVersesCount, setDailyVersesCount] = useState<number>(5863);
   const [totalGiving, setTotalGiving] = useState<number>(717);
   const [careCellCount, setCareCellCount] = useState<number>(1);
+  const [prayerCount, setPrayerCount] = useState<number>(5);
+  const [pendingPrayers, setPendingPrayers] = useState<number>(0);
+  const [pendingBaptismCount, setPendingBaptismCount] = useState<number>(1);
+  const [volunteerAppsCount, setVolunteerAppsCount] = useState<number>(3);
+  const [pendingRegistrations, setPendingRegistrations] = useState<number>(0);
 
   // Live Activities & Upcoming Events
   const [liveActivities, setLiveActivities] = useState<ActivityItem[]>([
@@ -278,6 +284,46 @@ export default function AdminDashboardPage() {
       }
     });
 
+    // 7. Prayer Requests
+    const unsubPrayers = subscribeChurchData<any>('prayerRequests', (items) => {
+      if (items && items.length > 0) {
+        setPrayerCount(items.length);
+        const pending = items.filter((p: any) => p.status === 'Pending' || p.status === 'pending');
+        setPendingPrayers(pending.length);
+      } else {
+        setPrayerCount(5);
+        setPendingPrayers(0);
+      }
+    });
+
+    // 8. Baptism Requests
+    const unsubBaptisms = subscribeChurchData<any>('baptism_requests', (items) => {
+      if (items && items.length > 0) {
+        setPendingBaptismCount(items.length);
+      } else {
+        setPendingBaptismCount(1);
+      }
+    });
+
+    // 9. Volunteer Applications
+    const unsubVolunteers = subscribeChurchData<any>('volunteer_applications', (items) => {
+      if (items && items.length > 0) {
+        setVolunteerAppsCount(items.length);
+      } else {
+        setVolunteerAppsCount(3);
+      }
+    });
+
+    // 10. Registration Requests
+    const unsubRegistrations = subscribeChurchData<any>('registration_requests', (items) => {
+      if (items && items.length > 0) {
+        const pending = items.filter((r: any) => !r.status || r.status.includes('Pending'));
+        setPendingRegistrations(pending.length);
+      } else {
+        setPendingRegistrations(0);
+      }
+    });
+
     return () => {
       unsubMembers();
       unsubAttendance();
@@ -285,6 +331,10 @@ export default function AdminDashboardPage() {
       unsubSongs();
       unsubDonations();
       unsubCareCells();
+      unsubPrayers();
+      unsubBaptisms();
+      unsubVolunteers();
+      unsubRegistrations();
     };
   }, []);
 
@@ -383,6 +433,15 @@ export default function AdminDashboardPage() {
                     />
                     <span>Last Sync: {lastSyncTime}</span>
                   </button>
+
+                  {/* Member View Shortcut */}
+                  <Link
+                    href="/dashboard"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-amber-200 text-[11px] font-semibold backdrop-blur-xs transition-colors hover:border-amber-400/40"
+                  >
+                    <ArrowLeft size={11} className="text-[#E5C158]" />
+                    <span>Member View</span>
+                  </Link>
                 </div>
               </div>
 
@@ -533,6 +592,49 @@ export default function AdminDashboardPage() {
                 This period total
               </div>
             </div>
+          </div>
+
+          {/* Operational Status Bar (Exact match to shared screenshot) */}
+          <div className="flex flex-wrap items-center gap-2 p-2 px-3.5 rounded-2xl bg-[#F7F5EE]/90 dark:bg-[#0E1520] border border-[#EBE6DC] dark:border-[#1E2B3A] text-xs">
+            <span className="font-bold text-[#18221B] dark:text-white flex items-center gap-1.5 px-1 text-xs shrink-0">
+              <ShieldCheck size={14} className="text-[#1E6F43]" />
+              <span>Operational Status:</span>
+            </span>
+            <Link
+              href="/admin/prayer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] text-slate-700 dark:text-slate-300 hover:border-rose-400 text-xs transition-colors shadow-2xs"
+            >
+              <Heart size={12} className="text-rose-500" />
+              <span>Prayer Requests: <strong>{prayerCount}</strong> ({pendingPrayers} pending)</span>
+            </Link>
+            <Link
+              href="/admin/care-cells"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] text-slate-700 dark:text-slate-300 hover:border-emerald-400 text-xs transition-colors shadow-2xs"
+            >
+              <Layers size={12} className="text-emerald-500" />
+              <span>Care Cells: <strong>{careCellCount}</strong> active</span>
+            </Link>
+            <Link
+              href="/admin/baptism"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] text-slate-700 dark:text-slate-300 hover:border-sky-400 text-xs transition-colors shadow-2xs"
+            >
+              <Droplets size={12} className="text-sky-500" />
+              <span>Baptism Requests: <strong>{pendingBaptismCount}</strong> pending</span>
+            </Link>
+            <Link
+              href="/admin/volunteering"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] text-slate-700 dark:text-slate-300 hover:border-amber-400 text-xs transition-colors shadow-2xs"
+            >
+              <Users size={12} className="text-amber-500" />
+              <span>Volunteers: <strong>{volunteerAppsCount}</strong> active</span>
+            </Link>
+            <Link
+              href="/admin/members"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#131C27] border border-[#EBE6DC] dark:border-[#222F3E] text-slate-700 dark:text-slate-300 hover:border-purple-400 text-xs transition-colors shadow-2xs"
+            >
+              <UserPlus size={12} className="text-purple-500" />
+              <span>Registrations: <strong>{pendingRegistrations}</strong> pending review</span>
+            </Link>
           </div>
 
           {/* ========================================================= */}
