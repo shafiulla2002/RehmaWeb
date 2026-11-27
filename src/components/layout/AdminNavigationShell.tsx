@@ -75,8 +75,8 @@ export const WAVE7B_ADMIN_NAV: AdminNavItem[] = [
 
 export const WAVE7C_ADMIN_NAV: AdminNavItem[] = [
   { moduleId: 'M40', name: 'Admin Events & RSVP Analytics', routePath: '/admin/events', icon: CalendarDays, comingSoon: true },
-  { moduleId: 'M41', name: 'Admin Service Roster & Worship Operations', routePath: '/admin/service-planner', icon: ClipboardList, comingSoon: true },
-  { moduleId: 'M42', name: 'Pastor Event Itinerary, Route Planner & AI Voice Assistant', routePath: '/admin/pastor-events', icon: Navigation, comingSoon: true },
+  { moduleId: 'M41', name: 'Service Roster', routePath: '/admin/service-planner', icon: ClipboardList, comingSoon: true },
+  { moduleId: 'M42', name: "Pastor's Itinerary", routePath: '/admin/pastor-events', icon: Navigation, comingSoon: true },
   { moduleId: 'M43', name: 'Admin Job Circle & Ministry Teams', routePath: '/admin/job-circle', icon: Briefcase, comingSoon: true },
   { moduleId: 'M44', name: 'Admin Finance Suite', routePath: '/admin/finance', icon: Receipt, superAdminOnly: true, comingSoon: true },
   { moduleId: 'M45', name: 'Admin Celebrations Studio, Notifications, WhatsApp Inbox, Gallery & Online Meetings', routePath: '/admin/communications', icon: Megaphone, comingSoon: true },
@@ -150,8 +150,8 @@ export const AdminNavigationShell: React.FC<{ children: React.ReactNode }> = ({ 
     if (pathname.startsWith('/admin/baptism')) return 'M38 · Baptism Requests';
     if (pathname.startsWith('/admin/volunteering')) return 'M39 · Volunteer Management';
     if (pathname.startsWith('/admin/events')) return 'M40 · Admin Events & RSVP Analytics';
-    if (pathname.startsWith('/admin/service-planner')) return 'M41 · Admin Service Roster & Worship Operations';
-    if (pathname.startsWith('/admin/pastor-events')) return 'M42 · Pastor Event Itinerary, Route Planner & AI Voice Assistant';
+    if (pathname.startsWith('/admin/service-planner')) return 'M41 · Service Roster';
+    if (pathname.startsWith('/admin/pastor-events')) return "M42 · Pastor's Itinerary";
     if (pathname.startsWith('/admin/job-circle')) return 'M43 · Admin Job Circle & Ministry Teams';
     if (pathname.startsWith('/admin/finance')) return 'M44 · Admin Finance Suite';
     if (pathname.startsWith('/admin/communications')) return 'M45 · Admin Celebrations Studio, Notifications, WhatsApp Inbox, Gallery & Online Meetings';

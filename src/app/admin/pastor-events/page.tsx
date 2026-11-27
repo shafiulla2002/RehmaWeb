@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { AdminNavigationShell } from '@/components/layout/AdminNavigationShell';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { db } from '@/lib/firebase';
@@ -34,6 +35,7 @@ import {
   Compass,
   MapPin,
   Calendar,
+  CalendarDays,
   Clock,
   Phone,
   Shield,
@@ -55,6 +57,9 @@ import {
   Search,
   Filter,
   ArrowRight,
+  ArrowLeft,
+  Route,
+  Map as MapIcon,
   Car,
   Bike,
   Footprints,
@@ -320,6 +325,33 @@ export default function AdminPastorEventsPage() {
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<string>('PASTOR-EVT-101');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Mobile Itinerary Matching States
+  const [itineraryTab, setItineraryTab] = useState<'today' | 'upcoming' | 'past'>('today');
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState<boolean>(false);
+  const [startingLocation, setStartingLocation] = useState<string>('Church of God, Hyderabad');
+  const [isUpdatingLocation, setIsUpdatingLocation] = useState<boolean>(false);
+  const [isRoutePlanModalOpen, setIsRoutePlanModalOpen] = useState<boolean>(false);
+  const [isMapViewModalOpen, setIsMapViewModalOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('@rhema_pastor_starting_loc');
+      if (saved) setStartingLocation(saved);
+    } catch {}
+  }, []);
+
+  const handleUpdateStartingLocation = () => {
+    setIsUpdatingLocation(true);
+    try {
+      localStorage.setItem('@rhema_pastor_starting_loc', startingLocation);
+    } catch {}
+    setTimeout(() => {
+      setIsUpdatingLocation(false);
+      showToast('Starting location updated successfully');
+    }, 350);
+  };
+
   // Search & Filter
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<string>('ALL');
@@ -518,6 +550,103 @@ export default function AdminPastorEventsPage() {
       appointments[0]
     );
   }, [sortedDayAppointments, selectedAppointmentId, appointments]);
+
+  // Helper for today's date in YYYY-MM-DD
+  const getTodayDateStr = () => {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  // Categorize appointments into today, upcoming, past matching mobile app
+  const categorizedAppointments = useMemo(() => {
+    const today = getTodayDateStr();
+    return appointments.map((apt) => {
+      let section: 'today' | 'upcoming' | 'past' = 'upcoming';
+      if (apt.date === today) {
+        section = 'today';
+      } else if (apt.date < today) {
+        section = 'past';
+      }
+      return { ...apt, section };
+    });
+  }, [appointments]);
+
+  // Mobile Itinerary Displayed Events
+  const mobileDisplayedAppointments = useMemo(() => {
+    let list = selectedDateFilter
+      ? categorizedAppointments.filter((a) => a.date === selectedDateFilter)
+      : categorizedAppointments.filter((a) => a.section === itineraryTab);
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      list = list.filter(
+        (a) =>
+          a.title.toLowerCase().includes(q) ||
+          a.memberOrFamilyName.toLowerCase().includes(q) ||
+          a.destinationAddress.toLowerCase().includes(q) ||
+          a.appointmentType.toLowerCase().includes(q)
+      );
+    }
+
+    if (filterType !== 'ALL') {
+      list = list.filter((a) => a.appointmentType === filterType);
+    }
+
+    return list.sort((a, b) => {
+      if (a.date !== b.date) {
+        return itineraryTab === 'past' ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date);
+      }
+      return itineraryTab === 'past'
+        ? parseTimeToMinutes(b.startTime) - parseTimeToMinutes(a.startTime)
+        : parseTimeToMinutes(a.startTime) - parseTimeToMinutes(b.startTime);
+    });
+  }, [categorizedAppointments, selectedDateFilter, itineraryTab, searchQuery, filterType]);
+
+  // Mobile Stats
+  const mobileTotalEvents = mobileDisplayedAppointments.length;
+
+  const mobileTotalDistance = useMemo(() => {
+    if (mobileDisplayedAppointments.length === 0) return 0;
+    return mobileDisplayedAppointments.reduce((acc, apt) => {
+      const wDist = apt.waypoints.reduce((wAcc, w) => wAcc + (w.distanceKmFromPrev || 0), 0);
+      return acc + (wDist > 0 ? wDist : 14.2);
+    }, 0);
+  }, [mobileDisplayedAppointments]);
+
+  const mobileTotalTravelTime = useMemo(() => {
+    if (mobileDisplayedAppointments.length === 0) return 0;
+    return mobileDisplayedAppointments.reduce((acc, apt) => {
+      const wMins = apt.waypoints.reduce((wAcc, w) => wAcc + (w.transitDurationMin || 0), 0);
+      return acc + (wMins > 0 ? wMins : 30);
+    }, 0);
+  }, [mobileDisplayedAppointments]);
+
+  const formatDurationMins = (mins: number) => {
+    if (mins === 0) return '0 m';
+    if (mins < 60) return `${mins} m`;
+    const h = Math.floor(mins / 60);
+    const rem = mins % 60;
+    return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+  };
+
+  const formatEventDate = (dateStr: string) => {
+    if (!dateStr) return '';
+    try {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        const [y, m, d] = parts;
+        const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        return `${days[dateObj.getDay()]} ${d}-${m}-${y}`;
+      }
+      return dateStr;
+    } catch {
+      return dateStr;
+    }
+  };
 
   // =========================================================================
   // DETERMINISTIC ROUTE & BUFFER CALCULATION ENGINE
@@ -872,49 +1001,159 @@ export default function AdminPastorEventsPage() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
-        <div className="min-h-screen bg-[#070E17] text-slate-100 p-4 md:p-8 space-y-6">
-          {/* Top Banner with Pastoral Identity Switcher */}
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-amber-950/20">
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-4 md:p-8 space-y-6">
+          {/* Top Header Matching Mobile (Image 2: Pastor's Itinerary) */}
+          <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
-                <Navigation size={20} />
-              </div>
+              <Link
+                href="/admin/dashboard"
+                className="p-2 rounded-xl text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                title="Back to Admin Dashboard"
+              >
+                <ArrowLeft size={22} />
+              </Link>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base font-bold text-white tracking-wide">
-                    M42 · Pastor Event Itinerary, Route Planner &amp; AI Voice Assistant
-                  </h1>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-400/30 uppercase">
-                    Layer A Simulation
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Orchestrate pastoral visitation itineraries, evaluate simulated urban transit legs &amp; buffer warnings, and interact with the simulated AI voice assistant.
+                <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                  Pastor&apos;s Itinerary
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {activePastor.name} · {activePastor.roleTitle}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowDatePicker((prev) => !prev)}
+                className={`p-2.5 rounded-full border transition-all ${
+                  selectedDateFilter
+                    ? 'bg-amber-500 text-white border-amber-600'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+                title="Filter itinerary by date"
+              >
+                <CalendarDays size={18} />
+              </button>
+
               <button
                 type="button"
                 onClick={openCreateModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#1E6F43] hover:bg-[#185835] text-white text-xs font-semibold shadow-md shadow-emerald-950/40 transition-colors"
-                title="Create a new pastoral itinerary appointment"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100 shadow-md shadow-slate-950/15 transition-all"
               >
-                <Plus size={14} />
-                <span>+ Create Appointment</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleResetDemoData}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium transition-colors"
-                title="Reset to baseline synthetic demonstration appointments"
-              >
-                <RotateCcw size={14} />
-                <span>Reset Demo Data</span>
+                <Plus size={16} />
+                <span className="hidden sm:inline">New Event</span>
               </button>
             </div>
           </div>
+
+          {/* Sub-Tabs / Mode Bar */}
+          <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 overflow-x-auto text-xs">
+            <button
+              type="button"
+              onClick={() => setActiveTab('overview')}
+              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'overview'
+                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Calendar size={14} />
+              <span>Itinerary ({mobileDisplayedAppointments.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('route-planner')}
+              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'route-planner'
+                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Compass size={14} />
+              <span>Route Visualizer</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('voice-assistant')}
+              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'voice-assistant'
+                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Mic size={14} />
+              <span>AI Voice HUD</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('dossier')}
+              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'dossier'
+                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <HeartHandshake size={14} />
+              <span>Member Dossier</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('conflicts')}
+              className={`px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition-all ${
+                activeTab === 'conflicts'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <AlertTriangle size={14} className={travelMetrics.collisionCount > 0 ? 'text-red-500' : ''} />
+              <span>Buffer Analysis ({travelMetrics.collisionCount + travelMetrics.tightWarningCount})</span>
+            </button>
+          </div>
+
+          {/* Date Picker Popover */}
+          {showDatePicker && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-lg space-y-3 max-w-md">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-700 dark:text-slate-200">
+                <span>Select Date Filter</span>
+                <button
+                  type="button"
+                  onClick={() => setShowDatePicker(false)}
+                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  value={selectedDateFilter || getTodayDateStr()}
+                  onChange={(e) => setSelectedDateFilter(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-900 dark:text-white font-semibold"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDateFilter(getTodayDateStr());
+                    setShowDatePicker(false);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDateFilter(null);
+                    setShowDatePicker(false);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                >
+                  Clear Filter
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Toast Notification */}
           {toastMessage && (
@@ -924,212 +1163,131 @@ export default function AdminPastorEventsPage() {
             </div>
           )}
 
-          {/* Pastoral Identity Selector Bar & Date Filter */}
-          <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                <User size={18} />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                  Assigned Pastoral Identity (Demonstration Switcher)
-                </span>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <select
-                    value={selectedPastorId}
-                    onChange={(e) => setSelectedPastorId(e.target.value)}
-                    className="bg-slate-900 border border-slate-800 text-sm font-bold text-white rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500"
-                  >
-                    {PASTORAL_IDENTITIES.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name} · {p.roleTitle}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-950/60 text-emerald-300 border border-emerald-500/40">
-                    RBAC: Admin Role
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Date Picker & Quick Actions */}
-            <div className="flex items-center gap-3 text-xs border-t md:border-t-0 pt-2 md:pt-0 border-slate-800">
-              <div className="flex items-center gap-2">
-                <Calendar size={14} className="text-slate-400" />
-                <span className="text-slate-400 text-[11px]">Itinerary Date:</span>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 text-xs font-semibold text-white rounded-xl px-2.5 py-1.5 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="border-l border-slate-800 pl-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleTriggerVoiceCommand('summary')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors"
-                >
-                  <Volume2 size={14} className="text-amber-400" />
-                  <span>Audio Brief</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* KPI Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Scheduled Visits</span>
-                <Calendar size={16} className="text-emerald-400" />
-              </div>
-              <div className="text-2xl font-bold text-white">
-                {travelMetrics.appointmentCount} Appointments
-              </div>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                {travelMetrics.highPriorityCount} Marked High Priority / ICU
-              </p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Estimated Transit</span>
-                <Compass size={16} className="text-blue-400" />
-              </div>
-              <div className="text-2xl font-bold text-blue-300">
-                {travelMetrics.totalKm} Simulated KM
-              </div>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                Est. ~{travelMetrics.totalTransitMin} mins driving time
-              </p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Schedule Collisions</span>
-                <AlertTriangle size={16} className={travelMetrics.collisionCount > 0 ? 'text-red-400' : 'text-emerald-400'} />
-              </div>
-              <div className={`text-2xl font-bold ${travelMetrics.collisionCount > 0 ? 'text-red-400' : 'text-emerald-300'}`}>
-                {travelMetrics.collisionCount} Collisions
-              </div>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                {travelMetrics.tightWarningCount} Tight transit warnings (&lt;15m)
-              </p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">AI Voice HUD</span>
-                <Mic size={16} className={isVoiceSpeaking ? 'text-red-400 animate-pulse' : 'text-purple-400'} />
-              </div>
-              <div className="text-2xl font-bold text-purple-300">
-                {isVoiceSpeaking ? 'Speaking...' : 'Ready'}
-              </div>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                SpeechSynthesis / Click-to-Trigger Demo
-              </p>
-            </div>
-          </div>
-
-          {/* Sub-Tabs Navigation */}
-          <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
-            <button
-              type="button"
-              onClick={() => setActiveTab('overview')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                activeTab === 'overview'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Calendar size={15} />
-              <span>Itinerary Agenda ({sortedDayAppointments.length})</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('route-planner')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                activeTab === 'route-planner'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Compass size={15} />
-              <span>Route Planner &amp; SVG Map ({evaluatedRouteLegs.length} legs)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('voice-assistant')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                activeTab === 'voice-assistant'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <Mic size={15} />
-              <span>AI Voice Assistant Studio</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('dossier')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                activeTab === 'dossier'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <HeartHandshake size={15} />
-              <span>Member &amp; Prayer Dossier (M33 · M35)</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('conflicts')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                activeTab === 'conflicts'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-              }`}
-            >
-              <AlertTriangle size={15} className={travelMetrics.collisionCount > 0 ? 'text-red-400' : ''} />
-              <span>Transit Buffer Analysis ({travelMetrics.collisionCount + travelMetrics.tightWarningCount})</span>
-            </button>
-          </div>
-
           {/* ========================================================================= */}
-          {/* TAB 1: ITINERARY AGENDA & TIMELINE                                        */}
+          {/* TAB 1: MOBILE ITINERARY & AGENDA (Image 2: Pastor's Itinerary)            */}
           {/* ========================================================================= */}
           {activeTab === 'overview' && (
             <div className="space-y-4">
-              {/* Filter Toolbar */}
-              <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 bg-[#0B192C] border border-slate-800/80 rounded-2xl p-3 shadow-sm">
+              {/* Filter Tabs: Today | Upcoming | Past (Exact mobile match) */}
+              <div className="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-1 rounded-2xl flex items-center max-w-md">
+                {(['today', 'upcoming', 'past'] as const).map((tab) => {
+                  const isActive = itineraryTab === tab && !selectedDateFilter;
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => {
+                        setSelectedDateFilter(null);
+                        setItineraryTab(tab);
+                      }}
+                      className={`flex-1 py-2 text-center text-xs font-bold rounded-xl transition-all ${
+                        isActive
+                          ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-sm'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Date Filter Indicator Banner */}
+              {selectedDateFilter && (
+                <div className="flex items-center justify-between bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 px-4 py-2 rounded-xl text-xs text-amber-900 dark:text-amber-200">
+                  <span className="font-semibold">
+                    Filtered by Date: {selectedDateFilter}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDateFilter(null)}
+                    className="font-bold underline text-amber-800 dark:text-amber-300 hover:text-amber-900"
+                  >
+                    Show All
+                  </button>
+                </div>
+              )}
+
+              {/* STARTING FROM Card (Exact mobile match) */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm space-y-2">
+                <label className="block text-[11px] font-bold tracking-wider text-slate-500 uppercase">
+                  STARTING FROM
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={startingLocation}
+                    onChange={(e) => setStartingLocation(e.target.value)}
+                    placeholder="Type starting address..."
+                    className="flex-1 bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-900 dark:text-white font-medium focus:outline-none focus:border-slate-950 dark:focus:border-white transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUpdateStartingLocation}
+                    disabled={isUpdatingLocation}
+                    className="px-5 py-2.5 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100 disabled:opacity-50 transition-all shrink-0"
+                  >
+                    {isUpdatingLocation ? 'Updating...' : 'Update'}
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Type address and press Update
+                </p>
+              </div>
+
+              {/* 3-Column Stats Strip (Exact mobile match) */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm flex items-center justify-around divide-x divide-slate-200 dark:divide-slate-800 text-center">
+                <div className="flex-1 px-2">
+                  <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
+                    {mobileTotalEvents}
+                  </div>
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+                    EVENTS
+                  </div>
+                </div>
+
+                <div className="flex-1 px-2">
+                  <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
+                    {Math.round(mobileTotalDistance)} km
+                  </div>
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+                    TRAVEL DIST
+                  </div>
+                </div>
+
+                <div className="flex-1 px-2">
+                  <div className="text-xl sm:text-2xl font-extrabold text-slate-900 dark:text-white">
+                    {formatDurationMins(mobileTotalTravelTime)}
+                  </div>
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+                    TRAVEL TIME
+                  </div>
+                </div>
+              </div>
+
+              {/* Search Toolbar */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-3 shadow-sm">
                 <div className="flex items-center gap-2 flex-1">
-                  <Search size={15} className="text-slate-400 ml-1" />
+                  <Search size={15} className="text-slate-400 ml-1 shrink-0" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by appointment title, member name, destination..."
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                    placeholder="Search itinerary by title, member, destination..."
+                    className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-slate-950 dark:focus:border-white"
                   />
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <Filter size={14} className="text-slate-400" />
+                  <Filter size={14} className="text-slate-400 shrink-0" />
                   <select
                     value={filterType}
                     onChange={(e) => setFilterType(e.target.value)}
-                    className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                    className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none"
                   >
-                    <option value="ALL">All Appointment Types</option>
+                    <option value="ALL">All Types</option>
                     <option value="Hospital ICU Visitation">Hospital ICU Visitation</option>
-                    <option value="Home Blessing & Prayer">Home Blessing & Prayer</option>
+                    <option value="Home Blessing &amp; Prayer">Home Blessing &amp; Prayer</option>
                     <option value="Pre-Marital Counseling">Pre-Marital Counseling</option>
                     <option value="Elders Board Meeting">Elders Board Meeting</option>
                     <option value="Funeral Service">Funeral Service</option>
@@ -1137,160 +1295,171 @@ export default function AdminPastorEventsPage() {
                 </div>
               </div>
 
-              {/* Appointment Cards Timeline */}
-              {sortedDayAppointments.length === 0 ? (
-                <div className="bg-[#0B192C] border border-slate-800 rounded-2xl p-10 text-center space-y-3">
-                  <Calendar size={32} className="text-slate-600 mx-auto" />
-                  <p className="text-sm font-semibold text-slate-300">No appointments scheduled for this date &amp; pastor</p>
-                  <p className="text-xs text-slate-500">Click &ldquo;+ Create Appointment&rdquo; to add a new visit or select another date.</p>
+              {/* Events List or Empty State (Exact mobile match) */}
+              {mobileDisplayedAppointments.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center space-y-4 shadow-sm flex flex-col items-center justify-center">
+                  <div className="w-20 h-20 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500">
+                    <CalendarDays size={44} strokeWidth={1.5} />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-base font-bold text-slate-700 dark:text-slate-200">
+                      No events found for {selectedDateFilter ? 'selected date' : itineraryTab}
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {itineraryTab === 'today'
+                        ? 'No pastoral appointments or hospital visits scheduled for today.'
+                        : 'Switch tabs or schedule a new pastoral appointment.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    className="px-4 py-2 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100 transition-all flex items-center gap-2"
+                  >
+                    <Plus size={15} />
+                    <span>+ Schedule pastoral appointment</span>
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {sortedDayAppointments.map((item, index) => {
-                    const isSelected = item.id === activeAppointment?.id;
+                  {mobileDisplayedAppointments.map((item, index) => {
                     const leg = evaluatedRouteLegs[index];
-
                     return (
-                      <div key={item.id} className="space-y-3">
-                        <div
-                          onClick={() => setSelectedAppointmentId(item.id)}
-                          className={`cursor-pointer rounded-2xl p-5 border transition-all ${
-                            isSelected
-                              ? 'bg-[#0B192C] border-emerald-500/80 shadow-lg shadow-emerald-950/20'
-                              : 'bg-[#0B192C]/70 border-slate-800/80 hover:border-slate-700'
-                          }`}
-                        >
-                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                            <div className="flex items-start gap-3">
-                              <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex flex-col items-center justify-center shrink-0">
-                                <span className="text-[10px] font-bold text-slate-400">STOP</span>
-                                <span className="text-xs font-bold text-emerald-400">#{index + 1}</span>
-                              </div>
-
-                              <div>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950/80 border border-emerald-500/30 text-emerald-300">
-                                    {item.appointmentType}
-                                  </span>
-                                  {item.priorityLevel === 'High (Emergency)' && (
-                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-950/80 border border-red-500/30 text-red-300 animate-pulse">
-                                      High (Emergency)
-                                    </span>
-                                  )}
-                                  <span className="text-xs text-slate-400 font-medium">
-                                    {item.startTime} - {item.endTime}
-                                  </span>
-                                </div>
-                                <h3 className="font-bold text-white text-base mt-1">{item.title}</h3>
-                                <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
-                                  <span className="flex items-center gap-1 text-slate-300">
-                                    <User size={13} className="text-amber-400" />
-                                    {item.memberOrFamilyName}
-                                  </span>
-                                  <span className="flex items-center gap-1 text-slate-400">
-                                    <MapPin size={13} className="text-blue-400" />
-                                    {item.destinationAddress}
-                                  </span>
-                                </div>
-                              </div>
+                      <div
+                        key={item.id}
+                        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4 hover:border-slate-300 dark:hover:border-slate-700 transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-700/50">
+                                {item.appointmentType}
+                              </span>
+                              {item.priorityLevel === 'High (Emergency)' && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-200 dark:border-red-700/50">
+                                  High (Emergency)
+                                </span>
+                              )}
+                              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700/50">
+                                {item.status}
+                              </span>
                             </div>
-
-                            {/* Status & Actions */}
-                            <div className="flex items-center gap-2 self-end md:self-auto shrink-0">
-                              <select
-                                value={item.status}
-                                onChange={(e) => {
-                                  e.stopPropagation();
-                                  const updated = appointments.map((a) =>
-                                    a.id === item.id ? { ...a, status: e.target.value as PastorAppointmentStatus } : a
-                                  );
-                                  persistAppointments(updated);
-                                }}
-                                className="bg-slate-900 border border-slate-800 text-[11px] font-semibold text-emerald-300 rounded-xl px-2.5 py-1 focus:outline-none"
-                              >
-                                <option value="Scheduled">Scheduled</option>
-                                <option value="En Route (Simulated)">En Route (Simulated)</option>
-                                <option value="In Progress (Simulated)">In Progress (Simulated)</option>
-                                <option value="Completed (Simulated)">Completed (Simulated)</option>
-                                <option value="Cancelled">Cancelled</option>
-                              </select>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditModal(item);
-                                }}
-                                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
-                                title="Edit appointment"
-                              >
-                                <Edit3 size={13} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setDeletingTargetId(item.id);
-                                }}
-                                className="p-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-500/20"
-                                title="Delete appointment"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
+                            <h3 className="text-base font-bold text-amber-800 dark:text-amber-400">
+                              {item.title}
+                            </h3>
                           </div>
 
-                          {/* Notes and Badges */}
-                          <div className="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-                            <p className="text-[11px] text-slate-300 italic line-clamp-1">
-                              &ldquo;{item.pastoralNotes}&rdquo;
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(item)}
+                              className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1.5"
+                            >
+                              <Edit3 size={13} />
+                              <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingTargetId(item.id)}
+                              className="px-3 py-1.5 rounded-xl border border-red-200 dark:border-red-900/50 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center gap-1.5"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 text-xs text-slate-700 dark:text-slate-300">
+                          <div className="flex items-center gap-2">
+                            <Calendar size={14} className="text-slate-900 dark:text-slate-100 shrink-0" />
+                            <span>{formatEventDate(item.date)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Clock size={14} className="text-slate-900 dark:text-slate-100 shrink-0" />
+                            <span>
+                              Start: {item.startTime} {item.endTime ? `| End: ${item.endTime}` : ''}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                            <Clock size={14} className="shrink-0" />
+                            <span>
+                              Meeting length:{' '}
+                              {Math.max(
+                                15,
+                                parseTimeToMinutes(item.endTime) - parseTimeToMinutes(item.startTime)
+                              )}{' '}
+                              mins
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Venue & Location Section */}
+                        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                          <span className="text-[11px] font-bold tracking-wider text-teal-800 dark:text-teal-400 uppercase">
+                            VENUE &amp; LOCATION
+                          </span>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                            {item.memberOrFamilyName || 'Sanctuary Campus'}
+                          </p>
+                          {item.zone && (
+                            <p className="text-xs font-medium text-teal-700 dark:text-teal-300">
+                              {item.zone}
                             </p>
-                            <div className="flex items-center gap-2 text-[10px]">
-                              {item.anointingOilRequired && (
-                                <span className="px-2 py-0.5 rounded bg-amber-950/60 border border-amber-500/30 text-amber-300 font-medium">
-                                  Anointing Oil
-                                </span>
-                              )}
-                              {item.communionRequired && (
-                                <span className="px-2 py-0.5 rounded bg-purple-950/60 border border-purple-500/30 text-purple-300 font-medium">
-                                  Holy Communion Elements
-                                </span>
-                              )}
-                              {item.m35EscalatedPrayerId && (
-                                <span className="px-2 py-0.5 rounded bg-blue-950/60 border border-blue-500/30 text-blue-300 font-medium">
-                                  M35 Escalated ({item.m35EscalatedPrayerId})
-                                </span>
-                              )}
+                          )}
+                          {item.destinationAddress && (
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {item.destinationAddress}
+                            </p>
+                          )}
+
+                          <div className="pt-1">
+                            <a
+                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                item.destinationAddress || item.zone || item.memberOrFamilyName
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm"
+                            >
+                              <Navigation size={14} />
+                              <span>Get Directions</span>
+                            </a>
+                          </div>
+                        </div>
+
+                        {/* Live Journey Tracker */}
+                        <div className="pt-3 border-t border-slate-200 dark:border-slate-800 space-y-2">
+                          <span className="text-[11px] font-extrabold tracking-wider text-purple-700 dark:text-purple-400 uppercase">
+                            LIVE JOURNEY TRACKER
+                          </span>
+                          <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2">
+                              <Car size={16} className="text-purple-600 dark:text-purple-400 shrink-0" />
+                              <div>
+                                <p className="font-semibold text-slate-900 dark:text-white">
+                                  {startingLocation.split(',')[0]} &rarr;{' '}
+                                  {item.destinationAddress.split(',')[0]}
+                                </p>
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                                  Mode: {item.transitMode}{' '}
+                                  {item.anointingOilRequired ? '· Anointing Oil Required' : ''}{' '}
+                                  {item.communionRequired ? '· Communion Kit' : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p className="font-bold text-slate-900 dark:text-white">
+                                ~{item.waypoints[1]?.distanceKmFromPrev || 12.5} km
+                              </p>
+                              <p className="text-[11px] text-purple-600 dark:text-purple-400 font-semibold">
+                                ~{item.waypoints[1]?.transitDurationMin || 28} mins
+                              </p>
                             </div>
                           </div>
                         </div>
 
-                        {/* Inter-Stop Transit Buffer Indicator */}
-                        {leg && (
-                          <div
-                            className={`mx-6 px-4 py-2 rounded-xl text-xs border flex items-center justify-between ${
-                              leg.status === 'Schedule Collision'
-                                ? 'bg-red-950/40 border-red-500/40 text-red-300'
-                                : leg.status === 'Tight Transit Warning'
-                                ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
-                                : 'bg-slate-900/80 border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <Car size={13} className="text-slate-400" />
-                              <span className="font-semibold text-white">Simulated Transit:</span>
-                              <span>~{leg.distanceKm} km ({leg.transitDurationMin} mins) via {leg.transitMode}</span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <span className="font-semibold">
-                                {leg.status === 'Schedule Collision'
-                                  ? `🔴 Collision (${leg.availableBufferMin}m buffer)`
-                                  : leg.status === 'Tight Transit Warning'
-                                  ? `🟡 Tight Buffer (${leg.availableBufferMin}m available)`
-                                  : `🟢 Healthy Buffer (${leg.availableBufferMin}m)`}
-                              </span>
-                            </div>
+                        {item.pastoralNotes && (
+                          <div className="pt-2 text-xs text-slate-600 dark:text-slate-300 italic bg-amber-50/50 dark:bg-amber-950/20 p-2.5 rounded-lg border border-amber-200/40 dark:border-amber-800/30">
+                            &ldquo;{item.pastoralNotes}&rdquo;
                           </div>
                         )}
                       </div>
@@ -1298,6 +1467,27 @@ export default function AdminPastorEventsPage() {
                   })}
                 </div>
               )}
+
+              {/* Floating Bottom Action Buttons (Exact mobile match) */}
+              <div className="sticky bottom-6 z-30 flex items-center justify-center gap-3 pt-4 pointer-events-none">
+                <button
+                  type="button"
+                  onClick={() => setIsRoutePlanModalOpen(true)}
+                  className="pointer-events-auto flex items-center gap-2 px-6 py-3 rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950 font-extrabold text-sm shadow-xl shadow-slate-950/25 hover:scale-105 active:scale-95 transition-all"
+                >
+                  <Route size={18} />
+                  <span>Route Plan</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsMapViewModalOpen(true)}
+                  className="pointer-events-auto flex items-center gap-2 px-6 py-3 rounded-full bg-slate-800 text-white border border-slate-700 dark:bg-slate-800 dark:text-white font-extrabold text-sm shadow-xl shadow-slate-950/25 hover:scale-105 active:scale-95 transition-all"
+                >
+                  <MapIcon size={18} />
+                  <span>Map View</span>
+                </button>
+              </div>
             </div>
           )}
 
@@ -2205,6 +2395,186 @@ export default function AdminPastorEventsPage() {
                     className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
                   >
                     Confirm Delete (Simulated)
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Route Plan Modal */}
+          {isRoutePlanModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 flex items-center justify-center font-bold">
+                      <Route size={18} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Pastor&apos;s Route Plan</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Sequential multi-stop visitation itinerary</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsRoutePlanModalOpen(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Origin Point</span>
+                    <p className="font-bold text-slate-900 dark:text-white">{startingLocation}</p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] uppercase font-bold text-slate-400">Total Route</span>
+                    <p className="font-bold text-slate-900 dark:text-white">
+                      {Math.round(mobileTotalDistance)} km · ~{formatDurationMins(mobileTotalTravelTime)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800/40">
+                    <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                      START
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-emerald-900 dark:text-emerald-300">{startingLocation}</p>
+                      <p className="text-[11px] text-emerald-700 dark:text-emerald-400">Departure Origin</p>
+                    </div>
+                  </div>
+
+                  {mobileDisplayedAppointments.map((item, idx) => (
+                    <div key={item.id} className="space-y-2">
+                      <div className="ml-4 pl-4 border-l-2 border-dashed border-slate-300 dark:border-slate-700 py-1 text-xs text-slate-500">
+                        &darr; Leg {idx + 1}: ~{item.waypoints[1]?.distanceKmFromPrev || 12.5} km ({item.waypoints[1]?.transitDurationMin || 28} mins driving)
+                      </div>
+                      <div className="flex items-start gap-3 p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                        <div className="w-7 h-7 rounded-full bg-slate-950 text-white dark:bg-white dark:text-slate-950 flex items-center justify-center text-xs font-bold shrink-0">
+                          {idx + 1}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-bold text-slate-900 dark:text-white">{item.title}</p>
+                            <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">{item.startTime}</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-300">{item.memberOrFamilyName} · {item.destinationAddress}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between">
+                  <a
+                    href={`https://www.google.com/maps/dir/${encodeURIComponent(startingLocation)}/${mobileDisplayedAppointments.map((a) => encodeURIComponent(a.destinationAddress)).join('/')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100 flex items-center gap-2"
+                  >
+                    <Navigation size={14} />
+                    <span>Open Full Route in Google Maps</span>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsRoutePlanModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Map View Modal */}
+          {isMapViewModalOpen && (
+            <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full p-6 space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-2">
+                    <div className="w-9 h-9 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold">
+                      <MapIcon size={18} />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-extrabold text-slate-900 dark:text-white">Pastor&apos;s Itinerary Map View</h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Metropolitan zones &amp; destination waypoints</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsMapViewModalOpen(false)}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 overflow-hidden relative">
+                  <svg viewBox="0 0 550 400" className="w-full h-72 text-slate-400 select-none">
+                    <defs>
+                      <pattern id="modal-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1E293B" strokeWidth="0.5" />
+                      </pattern>
+                    </defs>
+                    <rect width="100%" height="100%" fill="url(#modal-grid)" />
+
+                    {Object.values(SYNTHETIC_METRO_ZONES).map((z) => (
+                      <g key={z.key}>
+                        <circle cx={z.x} cy={z.y} r="38" fill="#0F172A" stroke="#334155" strokeWidth="1" strokeDasharray="3 3" />
+                        <text x={z.x} y={z.y + 48} fill="#94A3B8" fontSize="9" textAnchor="middle" fontWeight="bold">
+                          {z.key}
+                        </text>
+                      </g>
+                    ))}
+
+                    {mobileDisplayedAppointments.map((apt, idx) => {
+                      const zoneObj = SYNTHETIC_METRO_ZONES[apt.zone] || SYNTHETIC_METRO_ZONES['Central Sanctuary'];
+                      return (
+                        <g key={apt.id} transform={`translate(${zoneObj.x}, ${zoneObj.y})`}>
+                          <circle cx="0" cy="0" r="14" fill="#059669" stroke="#ffffff" strokeWidth="2" />
+                          <text x="0" y="4" fill="#ffffff" fontSize="10" textAnchor="middle" fontWeight="bold">
+                            {idx + 1}
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  {mobileDisplayedAppointments.map((apt, idx) => (
+                    <div key={apt.id} className="p-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/60 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">
+                          {idx + 1}
+                        </span>
+                        <span className="font-semibold text-slate-900 dark:text-white truncate max-w-[180px]">{apt.title}</span>
+                      </div>
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(apt.destinationAddress)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-600 dark:text-emerald-400 hover:underline font-bold text-[11px]"
+                      >
+                        Map &rarr;
+                      </a>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsMapViewModalOpen(false)}
+                    className="px-4 py-2 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-100"
+                  >
+                    Close
                   </button>
                 </div>
               </div>

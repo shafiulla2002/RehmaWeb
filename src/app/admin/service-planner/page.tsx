@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { AdminNavigationShell } from '@/components/layout/AdminNavigationShell';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { db } from '@/lib/firebase';
@@ -58,6 +59,13 @@ import {
   Layers,
   Search,
   Filter,
+  CalendarDays,
+  MapPin,
+  UserCheck,
+  BarChart2,
+  ArrowLeft,
+  FileText,
+  ListOrdered,
 } from 'lucide-react';
 
 const STORAGE_KEY_SERVICE_PLANS = '@rhema_admin_m41_service_plans';
@@ -327,9 +335,36 @@ const BASELINE_M41_PLANS: M41ServicePlan[] = [
   },
 ];
 
+const getPlanDateParts = (dateStr: string) => {
+  if (!dateStr) return { day: '15', month: 'NOV' };
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const monthNames = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+    const monthIdx = parseInt(parts[1], 10) - 1;
+    return {
+      day: parts[2],
+      month: monthNames[monthIdx] || 'NOV',
+    };
+  }
+  return { day: '15', month: 'NOV' };
+};
+
+const getServiceTypeBadge = (typeStr: string) => {
+  const norm = String(typeStr || '').toLowerCase();
+  if (norm.includes('1st') || norm.includes('worship')) return 'SUNDAY WORSHIP';
+  if (norm.includes('2nd') || norm.includes('celebration')) return 'SUNDAY CELEBRATION';
+  if (norm.includes('youth')) return 'YOUTH SERVICE';
+  if (norm.includes('communion')) return 'HOLY COMMUNION';
+  if (norm.includes('study')) return 'BIBLE STUDY';
+  if (norm.includes('prayer')) return 'FASTING PRAYER';
+  return 'SUNDAY WORSHIP';
+};
+
 export default function AdminServicePlannerPage() {
-  // Navigation Tabs: 'overview' | 'runsheet' | 'band-setlist' | 'volunteers' | 'conflicts'
-  const [activeTab, setActiveTab] = useState<'overview' | 'runsheet' | 'band-setlist' | 'volunteers' | 'conflicts'>('overview');
+  // Navigation Tabs matching mobile Service Roster
+  const [activeTab, setActiveTab] = useState<'overview' | 'runsheet' | 'band-setlist' | 'volunteers' | 'attendance' | 'analytics'>('overview');
+  const [serviceSearch, setServiceSearch] = useState('');
+  const [serviceStatusFilter, setServiceStatusFilter] = useState<'ALL' | 'DRAFT' | 'PUBLISHED' | 'COMPLETED'>('ALL');
 
   // Service Plans State
   const [servicePlans, setServicePlans] = useState<M41ServicePlan[]>(BASELINE_M41_PLANS);
@@ -499,6 +534,29 @@ export default function AdminServicePlannerPage() {
   const activePlan = useMemo(() => {
     return servicePlans.find((p) => p.id === selectedPlanId) || servicePlans[0];
   }, [servicePlans, selectedPlanId]);
+
+  // Filtered Service Plans for Services Tab
+  const filteredPlans = useMemo(() => {
+    return servicePlans.filter((plan) => {
+      if (serviceSearch.trim()) {
+        const q = serviceSearch.toLowerCase();
+        const match =
+          plan.serviceTitle.toLowerCase().includes(q) ||
+          plan.serviceType.toLowerCase().includes(q) ||
+          plan.leadPastor.toLowerCase().includes(q) ||
+          plan.worshipLeader.toLowerCase().includes(q) ||
+          plan.serviceDate.includes(q);
+        if (!match) return false;
+      }
+      if (serviceStatusFilter !== 'ALL') {
+        const norm = plan.status.toLowerCase();
+        if (serviceStatusFilter === 'DRAFT' && !norm.includes('draft')) return false;
+        if (serviceStatusFilter === 'PUBLISHED' && !norm.includes('confirm') && !norm.includes('publish')) return false;
+        if (serviceStatusFilter === 'COMPLETED' && !norm.includes('complete')) return false;
+      }
+      return true;
+    });
+  }, [servicePlans, serviceSearch, serviceStatusFilter]);
 
   // Total Run Sheet Runtime Calculation
   const totalRunSheetMinutes = useMemo(() => {
@@ -1067,63 +1125,32 @@ export default function AdminServicePlannerPage() {
   return (
     <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
-        <div className="min-h-screen bg-[#070E17] text-slate-100 p-4 md:p-8 space-y-6">
-          {/* Top Banner */}
-          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-amber-950/20">
+        <div className="p-4 sm:p-6 md:p-8 max-w-7xl mx-auto space-y-5 min-h-screen bg-[#F8F9FA] dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+          {/* Top Header Bar matching mobile Service Roster */}
+          <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-300 shrink-0">
-                <Sparkles size={20} />
-              </div>
+              <Link
+                href="/admin"
+                className="w-10 h-10 rounded-full border border-slate-200 dark:border-slate-800 flex items-center justify-center text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                title="Back to Admin Dashboard"
+              >
+                <ArrowLeft size={18} />
+              </Link>
               <div>
-                <div className="flex items-center gap-2">
-                  <h1 className="text-base font-bold text-white tracking-wide">
-                    M41 · Admin Service Roster &amp; Worship Operations
-                  </h1>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-400/30 uppercase">
-                    Layer A Simulation
-                  </span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Orchestrate weekly service plans, program run sheet cues, coordinate worship musicians, transpose setlists, assign volunteer duties, and auto-detect schedule conflicts.
-                </p>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white font-serif">
+                  Service Roster
+                </h1>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={openCreatePlanModal}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#1E6F43] hover:bg-[#185835] text-white text-xs font-semibold shadow-md shadow-emerald-950/40 transition-colors"
-                title="Create a new service plan from scratch"
+                className="px-4 py-2 rounded-full bg-slate-950 hover:bg-slate-800 text-white dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200 text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
               >
-                <Plus size={14} />
-                <span>+ Create New Plan</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleResetBaseline}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium transition-colors"
-                title="Reset service roster to baseline demonstration data"
-              >
-                <RotateCcw size={14} />
-                <span>Reset Demo Data</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleDuplicatePlan}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 text-xs font-semibold transition-colors"
-                title="Duplicate active service template for next week"
-              >
-                <Copy size={14} />
-                <span>Duplicate Plan</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsLiveStageHudOpen(true)}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors"
-              >
-                <Radio size={14} className="text-emerald-400" />
-                <span>Stage HUD Live</span>
+                <Plus size={15} />
+                <span>New Service</span>
               </button>
             </div>
           </div>
@@ -1136,296 +1163,303 @@ export default function AdminServicePlannerPage() {
             </div>
           )}
 
-          {/* KPI Cards Row */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Scheduled Plans</span>
-                <Calendar size={16} className="text-amber-400" />
-              </div>
-              <div className="text-2xl font-bold text-white">{kpis.totalPlans}</div>
-              <p className="text-[10px] text-slate-500 mt-0.5">Active Service Sessions</p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Band Coverage</span>
-                <Music size={16} className="text-emerald-400" />
-              </div>
-              <div className="text-2xl font-bold text-emerald-300">{kpis.musicianCoveragePct}%</div>
-              <p className="text-[10px] text-slate-500 mt-0.5">Confirmed Musicians</p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Volunteer Fill</span>
-                <Users size={16} className="text-blue-400" />
-              </div>
-              <div className="text-2xl font-bold text-blue-300">{kpis.volunteerCoveragePct}%</div>
-              <p className="text-[10px] text-slate-500 mt-0.5">M39 Department Quota</p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Setlist Repertoire</span>
-                <Volume2 size={16} className="text-purple-400" />
-              </div>
-              <div className="text-2xl font-bold text-purple-300">{kpis.setlistCount} Songs</div>
-              <p className="text-[10px] text-slate-500 mt-0.5">M31 Songbook Cues</p>
-            </div>
-
-            <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 shadow-sm col-span-2 md:col-span-1">
-              <div className="flex items-center justify-between text-slate-400 mb-1.5">
-                <span className="text-[11px] font-semibold uppercase tracking-wider">Schedule Health</span>
-                <AlertTriangle size={16} className={kpis.conflictCount > 0 ? 'text-amber-400' : 'text-emerald-400'} />
-              </div>
-              <div className={`text-2xl font-bold ${kpis.conflictCount > 0 ? 'text-amber-400' : 'text-emerald-300'}`}>
-                {kpis.conflictCount} Conflicts
-              </div>
-              <p className="text-[10px] text-slate-500 mt-0.5">
-                {kpis.conflictCount > 0 ? 'Action required in Conflict Tab' : 'Zero scheduling collisions'}
-              </p>
-            </div>
-          </div>
-
-          {/* Active Service Selector Bar (Aligned with M34 Attendance Slots) */}
-          <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                <ClipboardList size={18} />
-              </div>
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
-                  Target Service Session (M34 Aligned)
-                </span>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <select
-                    value={selectedPlanId}
-                    onChange={(e) => setSelectedPlanId(e.target.value)}
-                    className="bg-slate-900 border border-slate-800 text-sm font-bold text-white rounded-xl px-3 py-1.5 focus:outline-none focus:border-emerald-500"
-                  >
-                    {servicePlans.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.serviceDate} · {p.serviceType} — {p.serviceTitle}
-                      </option>
-                    ))}
-                  </select>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                      activePlan?.status === 'Confirmed (Sim)'
-                        ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-                        : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                    }`}
-                  >
-                    {activePlan?.status}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Service Summary Details */}
-            <div className="flex items-center gap-4 text-xs text-slate-300 border-t md:border-t-0 pt-2 md:pt-0 border-slate-800">
-              <div>
-                <span className="text-slate-500 block text-[10px]">Lead Pastor:</span>
-                <span className="font-semibold text-white">{activePlan?.leadPastor}</span>
-              </div>
-              <div className="border-l border-slate-800 pl-4">
-                <span className="text-slate-500 block text-[10px]">Worship Leader:</span>
-                <span className="font-semibold text-white">{activePlan?.worshipLeader}</span>
-              </div>
-              <div className="border-l border-slate-800 pl-4">
-                <span className="text-slate-500 block text-[10px]">Planned Window:</span>
-                <span className="font-semibold text-amber-300">
-                  {activePlan?.startTime} - {activePlan?.endTime} ({activePlan?.estimatedDurationMinutes}m)
-                </span>
-              </div>
-              <div className="border-l border-slate-800 pl-4">
-                <button
-                  type="button"
-                  onClick={() => openEditPlanModal(activePlan)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 text-xs font-medium transition-colors"
-                  title="Edit active service plan metadata"
-                >
-                  <Edit3 size={13} className="text-amber-400" />
-                  <span>Edit Plan</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Sub-Tabs Navigation */}
-          <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
+          {/* ─── Navigation Tabs (Services, Order Builder, Setlist, Assignments, Attendance, Analytics) ─── */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveTab('overview')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
                 activeTab === 'overview'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Calendar size={15} />
-              <span>Service Schedule &amp; Plans</span>
+              <CalendarDays size={14} />
+              <span>Services ({servicePlans.length})</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('runsheet')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
                 activeTab === 'runsheet'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Clock size={15} />
-              <span>Order of Worship (Run Sheet) ({activePlan?.runSheet?.length || 0})</span>
+              <Layers size={14} />
+              <span>Order Builder ({activePlan?.runSheet?.length || 0})</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('band-setlist')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
                 activeTab === 'band-setlist'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Music size={15} />
-              <span>Worship Band &amp; Setlist ({activePlan?.setlist?.length || 0})</span>
+              <Music size={14} />
+              <span>Worship Setlist ({activePlan?.setlist?.length || 0})</span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('volunteers')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
                 activeTab === 'volunteers'
-                  ? 'bg-[#1E6F43] text-white shadow-md shadow-emerald-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Users size={15} />
-              <span>M39 Volunteer Duties ({activePlan?.volunteerDuties?.length || 0})</span>
+              <ListOrdered size={14} />
+              <span>Assignments ({activePlan?.volunteerDuties?.length || 0})</span>
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveTab('conflicts')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-                activeTab === 'conflicts'
-                  ? 'bg-amber-600 text-white shadow-md shadow-amber-950/40'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              onClick={() => setActiveTab('attendance')}
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
+                activeTab === 'attendance'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <AlertTriangle size={15} className={detectedConflicts.length > 0 ? 'text-amber-400' : ''} />
-              <span>Conflicts &amp; Overlaps ({detectedConflicts.length})</span>
+              <UserCheck size={14} />
+              <span>Volunteer Attendance</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('analytics')}
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
+                activeTab === 'analytics'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <BarChart2 size={14} />
+              <span>Roster Analytics ({detectedConflicts.length})</span>
             </button>
           </div>
 
+          {/* Active Service Session Bar (Shown on sub-tabs) */}
+          {activeTab !== 'overview' && activeTab !== 'analytics' && (
+            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <ClipboardList size={18} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    Selected Service
+                  </span>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <select
+                      value={selectedPlanId}
+                      onChange={(e) => setSelectedPlanId(e.target.value)}
+                      className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs sm:text-sm font-bold text-slate-900 dark:text-white rounded-xl px-3 py-1.5 focus:outline-none"
+                    >
+                      {servicePlans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.serviceDate} · {p.serviceTitle} ({p.serviceType})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500">
+                <span>Pastor: <strong className="text-slate-900 dark:text-white">{activePlan?.leadPastor}</strong></span>
+                <span>·</span>
+                <span>Worship: <strong className="text-slate-900 dark:text-white">{activePlan?.worshipLeader}</strong></span>
+              </div>
+            </div>
+          )}
+
           {/* ========================================================================= */}
-          {/* TAB 1: SERVICE SCHEDULE & PLANS                                           */}
+          {/* TAB 1: SERVICES LIST (Matching Image 1 mobile screen)                      */}
           {/* ========================================================================= */}
           {activeTab === 'overview' && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {servicePlans.map((plan) => {
-                  const isSelected = plan.id === activePlan?.id;
-                  const confirmedBand = plan.musicians.filter((m) => m.status === 'Confirmed').length;
-                  const filledVolunteers = plan.volunteerDuties.filter((d) => d.status !== 'Unassigned').length;
-
-                  return (
-                    <div
-                      key={plan.id}
-                      onClick={() => setSelectedPlanId(plan.id)}
-                      className={`cursor-pointer rounded-2xl p-5 border transition-all ${
-                        isSelected
-                          ? 'bg-[#0B192C] border-emerald-500/80 shadow-lg shadow-emerald-950/20'
-                          : 'bg-[#0B192C]/70 border-slate-800/80 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/30 text-[10px] font-bold text-emerald-300">
-                              {plan.serviceType}
-                            </span>
-                            <span className="text-xs text-slate-400 font-medium">{plan.serviceDate}</span>
-                          </div>
-                          <h3 className="font-bold text-white text-base mt-1.5">{plan.serviceTitle}</h3>
-                        </div>
-
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider border ${
-                            plan.status === 'Confirmed (Sim)'
-                              ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/40'
-                              : 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                          }`}
-                        >
-                          {plan.status}
-                        </span>
-                      </div>
-
-                      <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-                        <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
-                          <span className="text-[10px] text-slate-400 block">Band Lineup</span>
-                          <span className="font-bold text-emerald-400">
-                            {confirmedBand}/{plan.musicians.length} Confirmed
-                          </span>
-                        </div>
-                        <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
-                          <span className="text-[10px] text-slate-400 block">Volunteer Roster</span>
-                          <span className="font-bold text-blue-400">
-                            {filledVolunteers}/{plan.volunteerDuties.length} Filled
-                          </span>
-                        </div>
-                        <div className="bg-slate-900/80 p-2 rounded-xl border border-slate-800">
-                          <span className="text-[10px] text-slate-400 block">Duration</span>
-                          <span className="font-bold text-amber-300">{plan.estimatedDurationMinutes} mins</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                        <span>Lead Pastor: <strong className="text-white">{plan.leadPastor}</strong></span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEditPlanModal(plan);
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1"
-                            title="Edit plan metadata"
-                          >
-                            <Edit3 size={12} className="text-amber-400" />
-                            <span>Edit</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedPlanId(plan.id);
-                              setActiveTab('runsheet');
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium"
-                          >
-                            Open Run Sheet
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeletingPlanId(plan.id);
-                            }}
-                            className="p-1 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-400 border border-red-500/20"
-                            title="Delete plan"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+              {/* Search Bar */}
+              <div className="relative">
+                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  value={serviceSearch}
+                  onChange={(e) => setServiceSearch(e.target.value)}
+                  placeholder="Search services by title, preacher, date..."
+                  className="w-full pl-10 pr-4 py-2.5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-950 dark:focus:ring-white shadow-sm"
+                />
+                {serviceSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setServiceSearch('')}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
+
+              {/* Filter Pills */}
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                {(['ALL', 'DRAFT', 'PUBLISHED', 'COMPLETED'] as const).map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setServiceStatusFilter(f)}
+                    className={`px-4 py-1.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                      serviceStatusFilter === f
+                        ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+
+              {/* Service Cards List */}
+              {filteredPlans.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mx-auto">
+                    <CalendarDays size={24} />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">No Services Found</h3>
+                  <p className="text-xs text-slate-500">
+                    {serviceSearch ? 'Try clearing your search query.' : 'Click "+ New Service" to schedule a service.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredPlans.map((plan) => {
+                    const { day, month } = getPlanDateParts(plan.serviceDate);
+                    const isDraft = plan.status.toLowerCase().includes('draft');
+                    const isCompleted = plan.status.toLowerCase().includes('complete');
+
+                    return (
+                      <div
+                        key={plan.id}
+                        className="bg-white dark:bg-slate-900 border border-slate-200/90 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm hover:shadow-md transition-shadow"
+                      >
+                        <div className="flex items-start gap-4">
+                          {/* Date Badge: Rounded square box */}
+                          <div className="w-14 h-14 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 flex flex-col items-center justify-center shrink-0">
+                            <span className="text-lg font-black text-slate-900 dark:text-white leading-none">
+                              {day}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+                              {month}
+                            </span>
+                          </div>
+
+                          {/* Right Content */}
+                          <div className="flex-1 min-w-0">
+                            {/* Badges */}
+                            <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                              <span className="px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wide bg-amber-100/90 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300">
+                                {getServiceTypeBadge(plan.serviceType)}
+                              </span>
+                              <span
+                                className={`px-2.5 py-0.5 rounded-md text-[10px] font-extrabold uppercase tracking-wide ${
+                                  isDraft
+                                    ? 'bg-amber-100/90 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300'
+                                    : isCompleted
+                                    ? 'bg-blue-100/90 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300'
+                                    : 'bg-emerald-100/90 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300'
+                                }`}
+                              >
+                                {isDraft ? 'DRAFT' : isCompleted ? 'COMPLETED' : 'PUBLISHED'}
+                              </span>
+                            </div>
+
+                            {/* Title & Chevron */}
+                            <div
+                              onClick={() => {
+                                setSelectedPlanId(plan.id);
+                                setActiveTab('runsheet');
+                              }}
+                              className="flex items-center justify-between gap-2 cursor-pointer group"
+                            >
+                              <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                                {plan.serviceTitle}
+                              </h3>
+                              <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transition-colors shrink-0" />
+                            </div>
+
+                            {/* Time & Location */}
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 mt-1 flex-wrap">
+                              <span className="inline-flex items-center gap-1 font-medium">
+                                ⏰ {plan.startTime} - {plan.endTime} ({plan.estimatedDurationMinutes}m)
+                              </span>
+                              <span>·</span>
+                              <span className="inline-flex items-center gap-1">
+                                📍 Central Sanctuary
+                              </span>
+                            </div>
+
+                            {/* Horizontal Line Divider */}
+                            <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+
+                            {/* Summary info: Activities & Songs */}
+                            <div className="flex items-center gap-4 text-xs font-semibold text-slate-600 dark:text-slate-400">
+                              <span className="inline-flex items-center gap-1.5">
+                                📋 {plan.runSheet?.length || 0} Activities
+                              </span>
+                              <span className="inline-flex items-center gap-1.5">
+                                🎵 {plan.setlist?.length || 0} Songs
+                              </span>
+                            </div>
+
+                            {/* Action Buttons Row */}
+                            <div className="flex items-center gap-2 mt-3 pt-1">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditPlanModal(plan);
+                                }}
+                                className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                              >
+                                <Edit3 size={13} />
+                                <span>Edit</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedPlanId(plan.id);
+                                  setActiveTab('runsheet');
+                                }}
+                                className="px-3.5 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                              >
+                                <Layers size={13} />
+                                <span>Order Builder</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeletingPlanId(plan.id);
+                                }}
+                                className="px-3.5 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-bold inline-flex items-center gap-1.5 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                                <span>Delete</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -1739,34 +1773,118 @@ export default function AdminServicePlannerPage() {
           )}
 
           {/* ========================================================================= */}
-          {/* TAB 5: AUTOMATED CONFLICT DETECTION                                       */}
+          {/* TAB 5: VOLUNTEER ATTENDANCE (Matching Mobile Check-In)                    */}
           {/* ========================================================================= */}
-          {activeTab === 'conflicts' && (
+          {activeTab === 'attendance' && (
             <div className="space-y-4">
-              <div className="bg-[#0B192C] border border-slate-800/80 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white uppercase tracking-wider">
+                    Volunteer Attendance Check-In ({activePlan?.volunteerDuties?.length || 0} rostered)
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Service: {activePlan?.serviceTitle} · {activePlan?.serviceDate}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allChecked = activePlan.volunteerDuties.map(d => ({ ...d, status: 'Confirmed' as const }));
+                    const updated = servicePlans.map(p => p.id === activePlan.id ? { ...p, volunteerDuties: allChecked } : p);
+                    persistPlans(updated);
+                    showToast('Checked in all rostered volunteers');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-950 dark:bg-white text-white dark:text-slate-950 text-xs font-bold shadow-sm"
+                >
+                  Check In All
+                </button>
+              </div>
+
+              {activePlan?.volunteerDuties?.length === 0 ? (
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center text-slate-400">
+                  <UserCheck size={28} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-xs">No volunteer duties rostered for this service.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {activePlan?.volunteerDuties?.map((duty) => (
+                    <div
+                      key={duty.id}
+                      className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-sm"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-slate-900 dark:text-white">{duty.volunteerName}</div>
+                        <div className="text-[11px] text-slate-500">{duty.dutyRole}</div>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{duty.department}</div>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider ${
+                        duty.status === 'Confirmed'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
+                      }`}>
+                        {duty.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TAB 6: ROSTER ANALYTICS & CONFLICT ENGINE                                 */}
+          {/* ========================================================================= */}
+          {activeTab === 'analytics' && (
+            <div className="space-y-4">
+              {/* KPI Cards Row */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Scheduled Plans</div>
+                  <div className="text-2xl font-black text-slate-900 dark:text-white">{kpis.totalPlans}</div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Active Service Sessions</p>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Band Coverage</div>
+                  <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{kpis.musicianCoveragePct}%</div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Confirmed Musicians</p>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Volunteer Fill</div>
+                  <div className="text-2xl font-black text-blue-600 dark:text-blue-400">{kpis.volunteerCoveragePct}%</div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Department Quota</p>
+                </div>
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
+                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">Schedule Conflicts</div>
+                  <div className={`text-2xl font-black ${kpis.conflictCount > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{kpis.conflictCount}</div>
+                  <p className="text-[10px] text-slate-400 mt-0.5">{kpis.conflictCount > 0 ? 'Review conflicts below' : 'Zero collisions'}</p>
+                </div>
+              </div>
+
+              {/* Conflict Engine Card */}
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-sm">
                 <div className="flex items-center gap-2">
-                  <AlertTriangle size={18} className="text-amber-400" />
+                  <AlertTriangle size={18} className="text-amber-500" />
                   <div>
-                    <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+                    <h3 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
                       Automated Conflict Detection Engine
                     </h3>
-                    <p className="text-[11px] text-slate-400">
+                    <p className="text-[11px] text-slate-500">
                       Evaluates dual roles in same service, overlapping service times (15m buffer), and M39 availability profiles.
                     </p>
                   </div>
                 </div>
-                <span className="px-2.5 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[10px] font-bold text-amber-300">
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[10px] font-bold text-amber-600 dark:text-amber-400">
                   {detectedConflicts.length} Issues Detected
                 </span>
               </div>
 
               {detectedConflicts.length === 0 ? (
-                <div className="bg-[#0B192C] border border-emerald-500/30 rounded-2xl p-12 text-center space-y-2">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto">
+                <div className="bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800/40 rounded-2xl p-10 text-center space-y-2">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                     <CheckCircle2 size={24} />
                   </div>
-                  <h3 className="text-sm font-semibold text-white">All Schedules Harmonized</h3>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">All Schedules Harmonized</h3>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
                     No dual-role assignments, schedule overlaps, or availability collisions were detected across active service plans.
                   </p>
                 </div>
@@ -1777,26 +1895,26 @@ export default function AdminServicePlannerPage() {
                       key={conf.id}
                       className={`rounded-2xl p-4 border flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-sm ${
                         conf.severity === 'Critical'
-                          ? 'bg-red-950/20 border-red-500/40 text-red-200'
-                          : 'bg-amber-950/20 border-amber-500/40 text-amber-200'
+                          ? 'bg-rose-50/60 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/40'
+                          : 'bg-amber-50/60 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40'
                       }`}
                     >
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                               conf.severity === 'Critical'
-                                ? 'bg-red-900/80 text-white border-red-500'
-                                : 'bg-amber-900/80 text-white border-amber-500'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-amber-600 text-white'
                             }`}
                           >
                             {conf.severity} ({conf.conflictType})
                           </span>
-                          <span className="font-semibold text-white text-xs">{conf.personName}</span>
-                          <span className="text-[11px] text-slate-400">· {conf.serviceSlot}</span>
+                          <span className="font-bold text-slate-900 dark:text-white text-xs">{conf.personName}</span>
+                          <span className="text-[11px] text-slate-500">· {conf.serviceSlot}</span>
                         </div>
-                        <p className="text-xs text-slate-300">{conf.description}</p>
-                        <p className="text-[11px] text-slate-400 italic">💡 Suggested: {conf.suggestedResolution}</p>
+                        <p className="text-xs text-slate-600 dark:text-slate-300">{conf.description}</p>
+                        <p className="text-[11px] text-slate-500 italic">💡 Suggested: {conf.suggestedResolution}</p>
                       </div>
 
                       <button
@@ -1805,7 +1923,7 @@ export default function AdminServicePlannerPage() {
                           setActiveTab('volunteers');
                           showToast('Navigate to Volunteers Tab to reassign conflict');
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold shrink-0"
+                        className="px-3.5 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold shrink-0 hover:opacity-90"
                       >
                         Resolve Conflict
                       </button>
