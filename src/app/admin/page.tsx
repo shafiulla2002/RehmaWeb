@@ -419,7 +419,7 @@ export default function AdminDashboardPage() {
 
                   {/* Badge 2: Role: SUPERADMIN */}
                   <span className="inline-flex items-center px-3 py-1 rounded-full bg-[#162130]/90 border border-amber-400/40 text-amber-300 text-[11px] font-extrabold uppercase tracking-wider shadow-xs">
-                    Role: {role ? role.toUpperCase() : 'SUPERADMIN'}
+                    ROLE: {role ? role.toUpperCase() : 'SUPERADMIN'}
                   </span>
 
                   {/* Badge 3: Last Sync Pill */}
