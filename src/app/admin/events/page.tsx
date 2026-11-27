@@ -11,6 +11,7 @@ import {
   getDocs,
   doc,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   serverTimestamp,
@@ -30,7 +31,6 @@ import {
   RefreshCw,
   X,
   AlertCircle,
-  Sparkles,
   Calendar as CalendarIcon,
   QrCode,
   HeartHandshake,
@@ -43,11 +43,31 @@ import {
   Building,
   FileText,
   Repeat,
-  Radio,
-  ExternalLink,
+  ArrowUp,
+  ArrowDown,
+  UserCheck,
+  UserX,
+  Building2,
 } from 'lucide-react';
 
 export type EventStatus = 'Upcoming' | 'Published' | 'Draft' | 'Past' | 'Completed' | 'Cancelled';
+
+export interface WorshipSong {
+  id: string;
+  title: string;
+  titleTe?: string;
+  key?: string;
+  category?: string;
+  lyrics?: string;
+}
+
+export interface EventServiceItem {
+  id: string;
+  name: string;
+  time?: string;
+  songLeader?: string;
+  songs: WorshipSong[];
+}
 
 export interface FirebaseEventRecord {
   id: string;
@@ -59,6 +79,9 @@ export interface FirebaseEventRecord {
   description?: string;
   descriptionTe?: string;
   isRecurring?: boolean;
+  recurring?: string;
+  repeatPattern?: string;
+  recurrenceDuration?: number;
   startDate: string;
   endDate?: string;
   date?: string;
@@ -70,12 +93,10 @@ export interface FirebaseEventRecord {
   venue?: string;
   location?: string;
   address?: string;
-  roomOrHall?: string;
-  keynoteSpeaker?: string;
-  speaker?: string;
   bannerGradient?: string;
   bannerUrl?: string;
   posterUrl?: string;
+  eventServices?: EventServiceItem[];
   attachedSetlists?: string[];
   qrCodeRequired?: boolean;
   rsvpEnabled?: boolean;
@@ -107,10 +128,13 @@ export interface FirebaseRsvpRecord {
   updatedAt?: any;
 }
 
-export interface SongOption {
+export interface UnifiedMember {
   id: string;
-  title: string;
-  category?: string;
+  name: string;
+  phone?: string;
+  status: 'Present' | 'Absent';
+  timestamp?: any;
+  profilePicture?: string;
 }
 
 const EVENT_TYPE_OPTIONS = [
@@ -126,14 +150,43 @@ const EVENT_TYPE_OPTIONS = [
   'Other',
 ];
 
+const RECURRING_OPTIONS = [
+  { label: 'Select Recurrence', value: 'Select Recurrence' },
+  { label: 'Every Sunday', value: 'Every Sunday' },
+  { label: 'Every day · ప్రతిరోజూ', value: 'Every day' },
+  { label: 'Every week (specify day)', value: 'Every week' },
+  { label: 'First Sunday of every month', value: 'First Sunday' },
+  { label: 'Monthly (same date)', value: 'Monthly' },
+];
+
+const DURATION_OPTIONS = [
+  { label: 'For 1 month', value: 1 },
+  { label: 'For 2 months', value: 2 },
+  { label: 'For 3 months', value: 3 },
+  { label: 'For 6 months', value: 6 },
+  { label: 'For 1 year', value: 12 },
+];
+
+// Helper to add months to date string (YYYY-MM-DD)
+const addMonthsToDate = (dStr: string, monthsToAdd: number): string => {
+  try {
+    const d = new Date(dStr);
+    d.setMonth(d.getMonth() + monthsToAdd);
+    return d.toISOString().split('T')[0];
+  } catch {
+    return dStr;
+  }
+};
+
 export default function AdminEventsPage() {
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'events' | 'rsvps'>('events');
 
   // Core Data States
   const [events, setEvents] = useState<FirebaseEventRecord[]>([]);
   const [attendees, setAttendees] = useState<FirebaseRsvpRecord[]>([]);
-  const [availableSongs, setAvailableSongs] = useState<SongOption[]>([]);
+  const [availableSongs, setAvailableSongs] = useState<WorshipSong[]>([]);
+  const [churchMembersList, setChurchMembersList] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,11 +207,21 @@ export default function AdminEventsPage() {
   const [deletingEvent, setDeletingEvent] = useState<FirebaseEventRecord | null>(null);
   const [qrModalEvent, setQrModalEvent] = useState<FirebaseEventRecord | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
+
+  // Attendance Screen State (Matches mobile EventAttendeesScreen)
   const [attendModalEvent, setAttendModalEvent] = useState<FirebaseEventRecord | null>(null);
+  const [attendanceMembers, setAttendanceMembers] = useState<UnifiedMember[]>([]);
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
+  const [attendanceFilter, setAttendanceFilter] = useState<'All' | 'Present' | 'Absent'>('All');
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
+
+  // Song Picker Modal State (for Multi-Service manager)
+  const [songPickerServiceId, setSongPickerServiceId] = useState<string | null>(null);
+  const [songPickerSearch, setSongPickerSearch] = useState('');
+
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [customSetlistInput, setCustomSetlistInput] = useState('');
 
   // Form Validation & Errors
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -171,7 +234,6 @@ export default function AdminEventsPage() {
   // Format Helper: Display Date as DD-MM-YYYY matching mobile app
   const formatDisplayDate = (dateStr?: string) => {
     if (!dateStr) return 'TBA';
-    // If format is YYYY-MM-DD
     if (dateStr.includes('-') && dateStr.split('-')[0].length === 4) {
       const [year, month, day] = dateStr.split('-');
       return `${day}-${month}-${year}`;
@@ -179,7 +241,24 @@ export default function AdminEventsPage() {
     return dateStr;
   };
 
-  // Load Events & RSVPs from Firestore
+  // Avatar Initials & Color Generator (matching mobile app)
+  const getInitials = (name: string) => {
+    if (!name) return '?';
+    const parts = name.trim().split(' ');
+    if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+    return name.substring(0, 2).toUpperCase();
+  };
+
+  const getAvatarColor = (name: string) => {
+    const bgColors = ['bg-blue-100', 'bg-red-100', 'bg-emerald-100', 'bg-amber-100', 'bg-purple-100', 'bg-indigo-100'];
+    const textColors = ['text-blue-800', 'text-red-800', 'text-emerald-800', 'text-amber-800', 'text-purple-800', 'text-indigo-800'];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    const index = Math.abs(hash) % bgColors.length;
+    return { bg: bgColors[index], text: textColors[index] };
+  };
+
+  // Load Events, RSVPs, Songs & Church Members from Firestore
   const loadEvents = useCallback(async () => {
     try {
       setIsRefreshing(true);
@@ -203,6 +282,9 @@ export default function AdminEventsPage() {
           description: d.description || '',
           descriptionTe: d.descriptionTe || '',
           isRecurring: Boolean(d.isRecurring),
+          recurring: d.recurring || (d.isRecurring ? 'Every Sunday' : 'One-time event'),
+          repeatPattern: d.repeatPattern || d.recurring || 'Every Sunday',
+          recurrenceDuration: Number(d.recurrenceDuration || 1),
           startDate: d.startDate || d.date || '',
           endDate: d.endDate || d.startDate || d.date || '',
           date: d.date || d.startDate || '',
@@ -214,12 +296,10 @@ export default function AdminEventsPage() {
           venue: d.venue || d.venueName || d.location || 'Church Sanctuary',
           location: d.location || d.venueName || 'Church Sanctuary',
           address: d.address || d.location || '',
-          roomOrHall: d.roomOrHall || '',
-          keynoteSpeaker: d.keynoteSpeaker || d.speaker || 'Pastor',
-          speaker: d.speaker || d.keynoteSpeaker || 'Pastor',
           bannerGradient: d.bannerGradient || 'from-emerald-700 to-slate-900',
           bannerUrl: d.bannerUrl || d.posterUrl || '',
           posterUrl: d.posterUrl || d.bannerUrl || '',
+          eventServices: Array.isArray(d.eventServices) ? d.eventServices : [],
           attachedSetlists: Array.isArray(d.attachedSetlists) ? d.attachedSetlists : [],
           qrCodeRequired: Boolean(d.qrCodeRequired),
           rsvpEnabled: d.rsvpEnabled !== false,
@@ -237,7 +317,7 @@ export default function AdminEventsPage() {
         };
         items.push(item);
 
-        // Fetch subcollection RSVPs
+        // Fetch RSVPs
         try {
           const rsvpCol = collection(db, 'Rhema Church', 'rhema', 'events', eventId, 'rsvps');
           const rsvpSnap = await getDocs(rsvpCol);
@@ -262,7 +342,6 @@ export default function AdminEventsPage() {
           console.warn(`Could not load RSVPs for event ${eventId}:`, rErr);
         }
 
-        // Compute RSVP stats
         const eventRsvps = allRsvps.filter((r) => r.eventId === eventId);
         item.rsvpStats = {
           goingCount: eventRsvps.filter((r) => (r.status || '').toLowerCase() === 'going').length,
@@ -274,22 +353,46 @@ export default function AdminEventsPage() {
         };
       }
 
-      // Sort by startDate descending
       items.sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
       setEvents(items);
       setAttendees(allRsvps);
 
-      // Load available songs for setlist picker
+      // Load church songs for the worship service manager
       try {
         const songsSnap = await getDocs(collection(db, 'Rhema Church', 'rhema', 'songs'));
-        const songsList: SongOption[] = [];
+        const songsList: WorshipSong[] = [];
         songsSnap.forEach((docS) => {
           const sd = docS.data();
-          songsList.push({ id: docS.id, title: sd.title || 'Untitled Song', category: sd.category });
+          songsList.push({
+            id: docS.id,
+            title: sd.title || 'Untitled Song',
+            titleTe: sd.titleTe || '',
+            key: sd.key || sd.songKey || '',
+            category: sd.category || '',
+            lyrics: sd.lyrics || '',
+          });
         });
         setAvailableSongs(songsList);
       } catch {
         // songs optional
+      }
+
+      // Load church members for the attendance check-in drawer
+      try {
+        const membersSnap = await getDocs(collection(db, 'Rhema Church', 'rhema', 'members'));
+        const mList: any[] = [];
+        membersSnap.forEach((mDoc) => {
+          const md = mDoc.data();
+          mList.push({
+            id: mDoc.id,
+            name: md.fullName || md.name || md.memberName || 'Member',
+            phone: md.phone || md.mobile || '',
+            photoURL: md.photoURL || md.profilePicture || '',
+          });
+        });
+        setChurchMembersList(mList);
+      } catch {
+        // members optional
       }
     } catch (err: any) {
       console.error('Error loading church events:', err);
@@ -312,6 +415,9 @@ export default function AdminEventsPage() {
     description: '',
     descriptionTe: '',
     isRecurring: false,
+    recurring: 'Every Sunday',
+    repeatPattern: 'Every Sunday',
+    recurrenceDuration: 1,
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date().toISOString().split('T')[0],
     startTime: '09:00 AM',
@@ -320,7 +426,7 @@ export default function AdminEventsPage() {
     venueNameTe: '',
     address: '',
     posterUrl: '',
-    attachedSetlists: [] as string[],
+    eventServices: [] as EventServiceItem[],
     qrCodeRequired: false,
     rsvpEnabled: false,
     volunteerEnabled: false,
@@ -336,6 +442,9 @@ export default function AdminEventsPage() {
       description: '',
       descriptionTe: '',
       isRecurring: false,
+      recurring: 'Every Sunday',
+      repeatPattern: 'Every Sunday',
+      recurrenceDuration: 1,
       startDate: today,
       endDate: today,
       startTime: '09:00 AM',
@@ -344,7 +453,7 @@ export default function AdminEventsPage() {
       venueNameTe: '',
       address: '',
       posterUrl: '',
-      attachedSetlists: [],
+      eventServices: [],
       qrCodeRequired: false,
       rsvpEnabled: false,
       volunteerEnabled: false,
@@ -364,6 +473,9 @@ export default function AdminEventsPage() {
       description: evt.description || '',
       descriptionTe: evt.descriptionTe || '',
       isRecurring: Boolean(evt.isRecurring),
+      recurring: evt.recurring || evt.repeatPattern || 'Every Sunday',
+      repeatPattern: evt.repeatPattern || evt.recurring || 'Every Sunday',
+      recurrenceDuration: Number(evt.recurrenceDuration || 1),
       startDate: evt.startDate || evt.date || '',
       endDate: evt.endDate || evt.startDate || '',
       startTime: evt.startTime || evt.time || '09:00 AM',
@@ -372,7 +484,7 @@ export default function AdminEventsPage() {
       venueNameTe: evt.venueNameTe || '',
       address: evt.address || evt.location || '',
       posterUrl: evt.posterUrl || evt.bannerUrl || '',
-      attachedSetlists: evt.attachedSetlists || [],
+      eventServices: evt.eventServices || [],
       qrCodeRequired: Boolean(evt.qrCodeRequired),
       rsvpEnabled: Boolean(evt.rsvpEnabled),
       volunteerEnabled: Boolean(evt.volunteerEnabled),
@@ -412,6 +524,216 @@ export default function AdminEventsPage() {
     a.click();
   };
 
+  // Open Attendance Modal (Matches mobile app EventAttendeesScreen)
+  const openAttendanceModal = async (evt: FirebaseEventRecord) => {
+    setAttendModalEvent(evt);
+    setIsAttendanceLoading(true);
+    setAttendanceSearchQuery('');
+    setAttendanceFilter('All');
+
+    try {
+      // 1. Fetch checked-in attendees from subcollection
+      const attendeesSnap = await getDocs(
+        collection(db, 'Rhema Church', 'rhema', 'events', evt.id, 'attendees')
+      );
+      const attendedMap = new Map<string, any>();
+      attendeesSnap.forEach((docSnap) => {
+        const ad = docSnap.data();
+        const mId = ad.memberId || docSnap.id;
+        if (mId) {
+          attendedMap.set(mId, ad.timestamp || new Date());
+        }
+      });
+
+      // 2. Merge church members with attendees
+      const unifiedMap = new Map<string, UnifiedMember>();
+
+      churchMembersList.forEach((m: any) => {
+        unifiedMap.set(m.id, {
+          id: m.id,
+          name: m.name,
+          phone: m.phone,
+          status: attendedMap.has(m.id) ? 'Present' : 'Absent',
+          timestamp: attendedMap.get(m.id),
+          profilePicture: m.photoURL,
+        });
+      });
+
+      // Add any attendee not in churchMembersList (e.g. visitors)
+      attendeesSnap.forEach((docSnap) => {
+        const ad = docSnap.data();
+        const mId = ad.memberId || docSnap.id;
+        if (mId && !unifiedMap.has(mId)) {
+          unifiedMap.set(mId, {
+            id: mId,
+            name: ad.memberName || 'Guest / Visitor',
+            phone: ad.memberPhone || '',
+            status: 'Present',
+            timestamp: ad.timestamp || new Date(),
+            profilePicture: ad.photoURL || '',
+          });
+        }
+      });
+
+      const list = Array.from(unifiedMap.values());
+      list.sort((a, b) => {
+        if (a.status === 'Present' && b.status === 'Present') return 0;
+        if (a.status === 'Present') return -1;
+        if (b.status === 'Present') return 1;
+        return a.name.localeCompare(b.name);
+      });
+
+      setAttendanceMembers(list);
+    } catch (attErr) {
+      console.error('Error loading event attendees:', attErr);
+    } finally {
+      setIsAttendanceLoading(false);
+    }
+  };
+
+  // Toggle Attendance Check-In (Mark Present / Absent)
+  const handleToggleAttendance = async (member: UnifiedMember) => {
+    if (!attendModalEvent) return;
+
+    const newStatus = member.status === 'Present' ? 'Absent' : 'Present';
+    const nowTimestamp = new Date();
+
+    // Optimistically update local state
+    setAttendanceMembers((prev) =>
+      prev.map((m) =>
+        m.id === member.id
+          ? {
+              ...m,
+              status: newStatus,
+              timestamp: newStatus === 'Present' ? nowTimestamp : undefined,
+            }
+          : m
+      )
+    );
+
+    try {
+      const attRef = doc(db, 'Rhema Church', 'rhema', 'events', attendModalEvent.id, 'attendees', member.id);
+      if (newStatus === 'Present') {
+        await setDoc(attRef, {
+          memberId: member.id,
+          memberName: member.name,
+          memberPhone: member.phone || '',
+          status: 'Present',
+          timestamp: serverTimestamp(),
+        });
+        showToast(`${member.name} marked Present`);
+      } else {
+        await deleteDoc(attRef);
+        showToast(`${member.name} marked Absent`);
+      }
+    } catch (err: any) {
+      console.error('Failed to update attendance:', err);
+      showToast('Error updating attendance: ' + err.message);
+    }
+  };
+
+  // Export Attendance CSV
+  const handleExportAttendanceCSV = () => {
+    if (!attendModalEvent) return;
+    const rows = [
+      ['Member Name', 'Phone', 'Status', 'Check-In Time'],
+      ...attendanceMembers.map((m) => [
+        `"${m.name}"`,
+        `"${m.phone || ''}"`,
+        m.status,
+        m.timestamp?.toDate
+          ? m.timestamp.toDate().toLocaleTimeString()
+          : m.timestamp instanceof Date
+          ? m.timestamp.toLocaleTimeString()
+          : '',
+      ]),
+    ];
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Rhema-Attendance-${attendModalEvent.title.replace(/\s+/g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Multi-Service & Setlist Handlers
+  const handleAddService = () => {
+    const newService: EventServiceItem = {
+      id: `srv-${Date.now()}`,
+      name: `Service ${formData.eventServices.length + 1}`,
+      songs: [],
+    };
+    setFormData({
+      ...formData,
+      eventServices: [...formData.eventServices, newService],
+    });
+  };
+
+  const handleRemoveService = (serviceId: string) => {
+    setFormData({
+      ...formData,
+      eventServices: formData.eventServices.filter((s) => s.id !== serviceId),
+    });
+  };
+
+  const handleUpdateServiceName = (serviceId: string, name: string) => {
+    setFormData({
+      ...formData,
+      eventServices: formData.eventServices.map((s) => (s.id === serviceId ? { ...s, name } : s)),
+    });
+  };
+
+  const handleUpdateServiceSongLeader = (serviceId: string, songLeader: string) => {
+    setFormData({
+      ...formData,
+      eventServices: formData.eventServices.map((s) => (s.id === serviceId ? { ...s, songLeader } : s)),
+    });
+  };
+
+  const handleRemoveSongFromService = (serviceId: string, songIdx: number) => {
+    setFormData({
+      ...formData,
+      eventServices: formData.eventServices.map((s) => {
+        if (s.id !== serviceId) return s;
+        const newSongs = s.songs.filter((_, idx) => idx !== songIdx);
+        return { ...s, songs: newSongs };
+      }),
+    });
+  };
+
+  const handleMoveSongInService = (serviceId: string, songIdx: number, direction: 'up' | 'down') => {
+    setFormData({
+      ...formData,
+      eventServices: formData.eventServices.map((s) => {
+        if (s.id !== serviceId) return s;
+        const targetIdx = direction === 'up' ? songIdx - 1 : songIdx + 1;
+        if (targetIdx < 0 || targetIdx >= s.songs.length) return s;
+        const newSongs = [...s.songs];
+        const [moved] = newSongs.splice(songIdx, 1);
+        newSongs.splice(targetIdx, 0, moved);
+        return { ...s, songs: newSongs };
+      }),
+    });
+  };
+
+  // Toggle song in active service from Song Picker Modal
+  const handleToggleSongInPicker = (song: WorshipSong) => {
+    if (!songPickerServiceId) return;
+
+    setFormData({
+      ...formData,
+      eventServices: formData.eventServices.map((s) => {
+        if (s.id !== songPickerServiceId) return s;
+        const exists = s.songs.some((x) => x.id === song.id);
+        const newSongs = exists ? s.songs.filter((x) => x.id !== song.id) : [...s.songs, song];
+        return { ...s, songs: newSongs };
+      }),
+    });
+  };
+
   // Validation
   const validateEventForm = () => {
     const errors: Record<string, string> = {};
@@ -438,6 +760,9 @@ export default function AdminEventsPage() {
         description: formData.description.trim() || null,
         descriptionTe: formData.descriptionTe.trim() || null,
         isRecurring: formData.isRecurring,
+        recurring: formData.isRecurring ? formData.recurring : 'One-time event',
+        repeatPattern: formData.isRecurring ? formData.repeatPattern : 'One-time event',
+        recurrenceDuration: formData.isRecurring ? formData.recurrenceDuration : 1,
         startDate: formData.startDate,
         endDate: formData.endDate || formData.startDate,
         date: formData.startDate,
@@ -451,7 +776,11 @@ export default function AdminEventsPage() {
         address: formData.address.trim() || null,
         posterUrl: formData.posterUrl.trim() || null,
         bannerUrl: formData.posterUrl.trim() || null,
-        attachedSetlists: formData.attachedSetlists,
+        services: formData.eventServices,
+        eventServices: formData.eventServices,
+        hasWorshipServices: formData.eventServices.length > 0,
+        requireEventQR: formData.qrCodeRequired,
+        requireEventQr: formData.qrCodeRequired,
         qrCodeRequired: formData.qrCodeRequired,
         rsvpEnabled: formData.rsvpEnabled,
         volunteerEnabled: formData.volunteerEnabled,
@@ -555,6 +884,22 @@ export default function AdminEventsPage() {
     });
   }, [attendees, rsvpEventFilter, rsvpStatusFilter, rsvpSearchQuery]);
 
+  // Filtered Attendance for Drawer
+  const filteredAttendanceList = useMemo(() => {
+    return attendanceMembers.filter((m) => {
+      if (attendanceFilter === 'Present' && m.status !== 'Present') return false;
+      if (attendanceFilter === 'Absent' && m.status !== 'Absent') return false;
+      if (attendanceSearchQuery.trim()) {
+        const q = attendanceSearchQuery.toLowerCase();
+        return m.name.toLowerCase().includes(q) || (m.phone && m.phone.includes(q));
+      }
+      return true;
+    });
+  }, [attendanceMembers, attendanceFilter, attendanceSearchQuery]);
+
+  const presentCount = attendanceMembers.filter((m) => m.status === 'Present').length;
+  const absentCount = attendanceMembers.filter((m) => m.status === 'Absent').length;
+
   return (
     <ProtectedRoute allowedRoles={['admin', 'superadmin']}>
       <AdminNavigationShell>
@@ -616,9 +961,7 @@ export default function AdminEventsPage() {
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* STAT FILTER CARDS (Exact match to mobile app top pills)     */}
-          {/* ========================================================= */}
+          {/* STAT FILTER CARDS (Exact match to mobile app top pills) */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             {/* Card 1: PUBLISHED (Green) */}
             <button
@@ -726,9 +1069,7 @@ export default function AdminEventsPage() {
             )}
           </div>
 
-          {/* ========================================================= */}
-          {/* TAB 1: EVENTS SCHEDULE                                     */}
-          {/* ========================================================= */}
+          {/* TAB 1: EVENTS SCHEDULE */}
           {activeTab === 'events' && (
             <div className="space-y-4">
               {/* Search & Category Filter */}
@@ -914,16 +1255,16 @@ export default function AdminEventsPage() {
                             </span>
                           )}
 
-                          {/* Setlists Attached */}
-                          {evt.attachedSetlists && evt.attachedSetlists.length > 0 && (
+                          {/* Worship Services Configured */}
+                          {evt.eventServices && evt.eventServices.length > 0 && (
                             <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold">
                               <Music size={12} />
-                              <span>{evt.attachedSetlists.length} Setlist attached</span>
+                              <span>{evt.eventServices.length} Service{evt.eventServices.length > 1 ? 's' : ''} set</span>
                             </span>
                           )}
                         </div>
 
-                        {/* RSVP Active Pill Banner (Exact Mobile Card Feature) */}
+                        {/* RSVP Active Pill Banner */}
                         <div
                           onClick={() => {
                             setActiveTab('rsvps');
@@ -942,7 +1283,7 @@ export default function AdminEventsPage() {
                           </span>
                         </div>
 
-                        {/* Action Buttons Row (Exact match to mobile app buttons) */}
+                        {/* Action Buttons Row */}
                         <div className="grid grid-cols-4 gap-2 pt-1">
                           {/* 1. QR */}
                           <button
@@ -954,10 +1295,10 @@ export default function AdminEventsPage() {
                             <span>QR</span>
                           </button>
 
-                          {/* 2. Attend */}
+                          {/* 2. Attend (Opens full Event Attendance Screen) */}
                           <button
                             type="button"
-                            onClick={() => setAttendModalEvent(evt)}
+                            onClick={() => openAttendanceModal(evt)}
                             className="py-1.5 px-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                           >
                             <Users size={13} className="text-slate-500" />
@@ -992,9 +1333,7 @@ export default function AdminEventsPage() {
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* TAB 2: RSVP ROSTER                                         */}
-          {/* ========================================================= */}
+          {/* TAB 2: RSVP ROSTER */}
           {activeTab === 'rsvps' && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -1103,12 +1442,12 @@ export default function AdminEventsPage() {
           )}
 
           {/* ========================================================= */}
-          {/* NEW / EDIT EVENT FORM (Full Mobile App Feature Set)         */}
+          {/* NEW / EDIT EVENT FORM (Exact Mobile App Structure & Fields) */}
           {/* ========================================================= */}
           {isFormViewOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
               <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-3xl w-full p-5 sm:p-7 space-y-6 shadow-2xl relative my-auto max-h-[92vh] overflow-y-auto">
-                {/* Form Header with Back Link & Title */}
+                {/* Form Header */}
                 <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
                   <div className="flex items-center gap-3">
                     <button
@@ -1124,7 +1463,7 @@ export default function AdminEventsPage() {
                         {editingEvent ? 'Edit Event' : 'New Event'}
                       </h2>
                       <p className="text-[11px] text-slate-500">
-                        Saves live to Firestore collection: <code className="font-mono text-amber-500">Rhema Church/rhema/events</code>
+                        Saves live to Firestore: <code className="font-mono text-amber-500">Rhema Church/rhema/events</code>
                       </p>
                     </div>
                   </div>
@@ -1228,7 +1567,7 @@ export default function AdminEventsPage() {
                     </div>
                   </div>
 
-                  {/* CARD 2: DATE & SCHEDULE (📅 DATE & SCHEDULE) */}
+                  {/* CARD 2: DATE & SCHEDULE (With complete Recurring Fields) */}
                   <div className="p-4 sm:p-5 rounded-2xl bg-[#F8FAFC] dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 space-y-4">
                     <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-slate-800 dark:text-slate-200">
                       <span className="p-1.5 rounded-lg bg-slate-900 text-white">
@@ -1237,12 +1576,19 @@ export default function AdminEventsPage() {
                       <span>DATE &amp; SCHEDULE</span>
                     </div>
 
-                    {/* One-Time Event vs Recurring Toggle */}
+                    {/* One-Time vs Recurring Toggle */}
                     <div className="grid grid-cols-2 gap-2 p-1 bg-slate-200/60 dark:bg-slate-900 rounded-xl">
                       <button
                         type="button"
-                        onClick={() => setFormData({ ...formData, isRecurring: false })}
-                        className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            isRecurring: false,
+                            recurring: 'One-time event',
+                            repeatPattern: 'One-time event',
+                          });
+                        }}
+                        className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                           !formData.isRecurring
                             ? 'bg-black text-white shadow-xs'
                             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -1254,8 +1600,17 @@ export default function AdminEventsPage() {
 
                       <button
                         type="button"
-                        onClick={() => setFormData({ ...formData, isRecurring: true })}
-                        className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        onClick={() => {
+                          const newEnd = addMonthsToDate(formData.startDate, formData.recurrenceDuration || 1);
+                          setFormData({
+                            ...formData,
+                            isRecurring: true,
+                            recurring: formData.recurring === 'One-time event' ? 'Every Sunday' : formData.recurring,
+                            repeatPattern: formData.repeatPattern === 'One-time event' ? 'Every Sunday' : formData.repeatPattern,
+                            endDate: newEnd,
+                          });
+                        }}
+                        className={`py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                           formData.isRecurring
                             ? 'bg-black text-white shadow-xs'
                             : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -1266,22 +1621,26 @@ export default function AdminEventsPage() {
                       </button>
                     </div>
 
-                    {/* Date & Time Grid */}
+                    {/* Date Inputs Grid (With Dynamic Labels for Recurring) */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                          START DATE *
+                          {formData.isRecurring ? 'SERIES START DATE *' : 'START DATE *'}
                         </label>
                         <input
                           type="date"
                           value={formData.startDate}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const newStart = e.target.value;
+                            const newEnd = formData.isRecurring
+                              ? addMonthsToDate(newStart, formData.recurrenceDuration)
+                              : newStart;
                             setFormData({
                               ...formData,
-                              startDate: e.target.value,
-                              endDate: e.target.value,
-                            })
-                          }
+                              startDate: newStart,
+                              endDate: newEnd,
+                            });
+                          }}
                           className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none"
                         />
                         {formErrors.startDate && (
@@ -1293,7 +1652,7 @@ export default function AdminEventsPage() {
 
                       <div>
                         <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
-                          END DATE *
+                          {formData.isRecurring ? 'SERIES END DATE *' : 'END DATE *'}
                         </label>
                         <input
                           type="date"
@@ -1314,11 +1673,6 @@ export default function AdminEventsPage() {
                           placeholder="09:00 AM"
                           className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none"
                         />
-                        {formErrors.startTime && (
-                          <span className="text-[10px] text-rose-500 mt-1 block">
-                            {formErrors.startTime}
-                          </span>
-                        )}
                       </div>
 
                       <div>
@@ -1334,6 +1688,84 @@ export default function AdminEventsPage() {
                         />
                       </div>
                     </div>
+
+                    {/* RECURRING OPTIONS (Only displayed when Recurring is selected!) */}
+                    {formData.isRecurring && (
+                      <div className="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800/60 animate-in fade-in">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* Repeat Pattern */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                              Repeat Pattern <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              value={formData.repeatPattern}
+                              onChange={(e) =>
+                                setFormData({
+                                  ...formData,
+                                  repeatPattern: e.target.value,
+                                  recurring: e.target.value,
+                                })
+                              }
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none"
+                            >
+                              {RECURRING_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Recurrence Duration */}
+                          <div>
+                            <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">
+                              Recurrence Duration
+                            </label>
+                            <select
+                              value={formData.recurrenceDuration}
+                              onChange={(e) => {
+                                const months = Number(e.target.value);
+                                const newEnd = addMonthsToDate(formData.startDate, months);
+                                setFormData({
+                                  ...formData,
+                                  recurrenceDuration: months,
+                                  endDate: newEnd,
+                                });
+                              }}
+                              className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none"
+                            >
+                              {DURATION_OPTIONS.map((d) => (
+                                <option key={d.value} value={d.value}>
+                                  {d.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* Recurring Info Card (Matching Mobile App exactly) */}
+                        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Repeat size={14} className="text-emerald-600 dark:text-emerald-400" />
+                            <span className="inline-flex px-2 py-0.5 rounded-md bg-emerald-600 text-white text-[10px] font-extrabold uppercase tracking-wider">
+                              {formData.repeatPattern === 'Every day' ? 'DAILY EVENT SERIES' : 'RECURRING EVENT SERIES'}
+                            </span>
+                          </div>
+                          <div className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
+                            {formData.repeatPattern === 'Every day'
+                              ? `Repeats Every Day from ${formatDisplayDate(formData.startDate)} to ${formatDisplayDate(formData.endDate)}`
+                              : `Repeats (${formData.repeatPattern}) from ${formatDisplayDate(formData.startDate)} to ${formatDisplayDate(formData.endDate)}`}
+                          </div>
+                          <div className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-relaxed">
+                            Every occurrence in this period will automatically be generated in the church calendar. Attendance is recorded independently for each day.
+                          </div>
+                          <div className="text-[11px] text-emerald-600 dark:text-emerald-500 font-serif leading-relaxed">
+                            ఈ కాలంలోని ప్రతి ఈవెంట్ స్వతంత్రంగా క్యాలెండర్‌లో సృష్టించబడుతుంది మరియు ప్రతి దినం హాజరు ప్రత్యేకంగా నమోదు చేయబడుతుంది.
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* CARD 3: VENUE & LOCATION (📍 VENUE & LOCATION) */}
@@ -1448,7 +1880,7 @@ export default function AdminEventsPage() {
                       </p>
                     </div>
 
-                    {/* Live Preview if url exists */}
+                    {/* Live Preview */}
                     {formData.posterUrl && (
                       <div className="pt-2">
                         <span className="text-[10px] font-bold uppercase text-slate-400 tracking-wider block mb-1">
@@ -1473,93 +1905,182 @@ export default function AdminEventsPage() {
                     )}
                   </div>
 
-                  {/* CARD 5: WORSHIP SERVICES & SONG SETLISTS (🎵) */}
-                  <div className="p-4 sm:p-5 rounded-2xl bg-[#F8FAFC] dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 space-y-3">
-                    <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                      <span className="p-1.5 rounded-lg bg-emerald-600 text-white">
-                        <Music size={14} />
-                      </span>
-                      <span>WORSHIP SERVICES &amp; SONG SETLISTS</span>
+                  {/* CARD 5: WORSHIP SERVICES & SONG SETLISTS (Exact Mobile App Implementation) */}
+                  <div className="p-4 sm:p-5 rounded-2xl bg-[#F8FAFC] dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800/80 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="p-1.5 rounded-lg bg-emerald-500 text-white">
+                          <Music size={14} />
+                        </span>
+                        <div>
+                          <div className="text-xs font-extrabold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+                            Worship Services &amp; Song Setlists
+                          </div>
+                          <div className="text-[11px] text-slate-500">
+                            {formData.eventServices.length === 0
+                              ? 'Optional: attach worship services & song setlists to this event'
+                              : `${formData.eventServices.length} service${formData.eventServices.length > 1 ? 's' : ''} configured`}
+                          </div>
+                        </div>
+                      </div>
+
+                      {formData.eventServices.length > 0 && (
+                        <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-extrabold tracking-wider">
+                          ENABLED
+                        </span>
+                      )}
                     </div>
 
-                    <p className="text-xs text-slate-500">
-                      Optional: attach worship services &amp; song setlists to this event
-                    </p>
+                    {/* List of Configured Services */}
+                    {formData.eventServices.map((service, sIndex) => (
+                      <div
+                        key={service.id}
+                        className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3"
+                      >
+                        {/* Service Card Header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded-md bg-emerald-500 text-white text-xs font-black flex items-center justify-center">
+                              {sIndex + 1}
+                            </span>
+                            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                              SERVICE NAME <span className="text-red-500">*</span>
+                            </span>
+                          </div>
 
-                    {/* Attached Setlists list */}
-                    {formData.attachedSetlists.length > 0 && (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {formData.attachedSetlists.map((item, idx) => (
-                          <span
-                            key={idx}
-                            className="px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5"
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveService(service.id)}
+                            className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                           >
-                            <Music size={12} />
-                            <span>{item}</span>
+                            <Trash2 size={12} />
+                            <span>Remove</span>
+                          </button>
+                        </div>
+
+                        {/* Service Name Input */}
+                        <input
+                          type="text"
+                          value={service.name}
+                          onChange={(e) => handleUpdateServiceName(service.id, e.target.value)}
+                          placeholder="e.g. English Service, Morning Worship (Required)"
+                          className="w-full px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white font-bold focus:outline-none"
+                        />
+
+                        {/* Song Leader (Optional) */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-extrabold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+                            SONG LEADER (OPTIONAL)
+                          </label>
+                          <input
+                            type="text"
+                            value={service.songLeader || ''}
+                            onChange={(e) => handleUpdateServiceSongLeader(service.id, e.target.value)}
+                            placeholder="e.g. Bro. David, Sis. Sarah"
+                            className="w-full px-3 py-1.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white font-medium focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Song Setlist Sub-Section */}
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+                              SONG SETLIST ({service.songs.length} songs)
+                            </span>
+
                             <button
                               type="button"
                               onClick={() => {
-                                const updated = formData.attachedSetlists.filter((_, i) => i !== idx);
-                                setFormData({ ...formData, attachedSetlists: updated });
+                                setSongPickerServiceId(service.id);
+                                setSongPickerSearch('');
                               }}
-                              className="text-emerald-600 hover:text-emerald-900 dark:hover:text-white"
+                              className="px-3 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1 cursor-pointer transition-colors"
                             >
-                              <X size={12} />
+                              <Plus size={12} />
+                              <span>Select Songs</span>
                             </button>
-                          </span>
-                        ))}
+                          </div>
+
+                          {/* Songs List inside this Service */}
+                          {service.songs.length === 0 ? (
+                            <div className="p-4 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400 space-y-1">
+                              <Music size={16} className="mx-auto text-slate-300" />
+                              <div>No songs added yet for this service.</div>
+                              <div className="text-[10px]">Click &apos;+ Select Songs&apos; to attach songs from songbook.</div>
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {service.songs.map((song, songIdx) => (
+                                <div
+                                  key={song.id || songIdx}
+                                  className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <span className="font-extrabold text-slate-400 text-[11px] w-5">
+                                      {songIdx + 1}.
+                                    </span>
+                                    <div className="truncate">
+                                      <div className="font-bold text-slate-900 dark:text-white truncate">
+                                        {song.title}
+                                      </div>
+                                      {song.titleTe && (
+                                        <div className="text-[10px] text-slate-500 font-serif truncate">
+                                          {song.titleTe}
+                                        </div>
+                                      )}
+                                    </div>
+                                    {song.key && (
+                                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[9px] font-bold">
+                                        {song.key}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={songIdx === 0}
+                                      onClick={() => handleMoveSongInService(service.id, songIdx, 'up')}
+                                      className="p-1 rounded text-slate-400 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
+                                      title="Move up"
+                                    >
+                                      <ArrowUp size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={songIdx === service.songs.length - 1}
+                                      onClick={() => handleMoveSongInService(service.id, songIdx, 'down')}
+                                      className="p-1 rounded text-slate-400 hover:text-slate-800 disabled:opacity-30 cursor-pointer"
+                                      title="Move down"
+                                    >
+                                      <ArrowDown size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveSongFromService(service.id, songIdx)}
+                                      className="p-1 rounded text-rose-500 hover:text-rose-700 cursor-pointer"
+                                      title="Remove from setlist"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
+                    ))}
 
-                    {/* Add Setlist input / dropdown */}
-                    <div className="flex items-center gap-2 pt-1">
-                      {availableSongs.length > 0 ? (
-                        <select
-                          onChange={(e) => {
-                            if (e.target.value && !formData.attachedSetlists.includes(e.target.value)) {
-                              setFormData({
-                                ...formData,
-                                attachedSetlists: [...formData.attachedSetlists, e.target.value],
-                              });
-                            }
-                            e.target.value = '';
-                          }}
-                          className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-700 dark:text-slate-300 focus:outline-none"
-                        >
-                          <option value="">Choose from Church Songbook...</option>
-                          {availableSongs.map((s) => (
-                            <option key={s.id} value={s.title}>
-                              {s.title} {s.category ? `(${s.category})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={customSetlistInput}
-                          onChange={(e) => setCustomSetlistInput(e.target.value)}
-                          placeholder="e.g. Sunday Worship Setlist A"
-                          className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs text-slate-900 dark:text-white focus:outline-none"
-                        />
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (customSetlistInput.trim()) {
-                            setFormData({
-                              ...formData,
-                              attachedSetlists: [...formData.attachedSetlists, customSetlistInput.trim()],
-                            });
-                            setCustomSetlistInput('');
-                          }
-                        }}
-                        className="px-4 py-2 rounded-xl bg-black hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Plus size={14} />
-                        <span>Add Service / Setlist</span>
-                      </button>
-                    </div>
+                    {/* Action button to add worship service */}
+                    <button
+                      type="button"
+                      onClick={handleAddService}
+                      className="w-full py-3 rounded-xl bg-black hover:bg-slate-800 text-white text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                    >
+                      <Plus size={15} />
+                      <span>{formData.eventServices.length === 0 ? 'Add Worship Service / Setlist' : 'Add Another Service'}</span>
+                    </button>
                   </div>
 
                   {/* CARD 6: ATTENDANCE CHECK-IN SETTINGS (🔲) */}
@@ -1664,7 +2185,7 @@ export default function AdminEventsPage() {
                     </button>
                   </div>
 
-                  {/* FOOTER ACTION BUTTONS (Matching Mobile App Exactly) */}
+                  {/* FOOTER ACTION BUTTONS */}
                   <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
                     <button
                       type="button"
@@ -1696,6 +2217,102 @@ export default function AdminEventsPage() {
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================= */}
+          {/* SONG PICKER MODAL (For Worship Services)                   */}
+          {/* ========================================================= */}
+          {songPickerServiceId && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-5 space-y-4 shadow-2xl relative max-h-[85vh] flex flex-col">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Music size={18} className="text-emerald-500" />
+                    <span>Select Worship Songs</span>
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setSongPickerServiceId(null)}
+                    className="p-1 text-slate-400 hover:text-slate-600"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {/* Search in Song Picker */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={songPickerSearch}
+                    onChange={(e) => setSongPickerSearch(e.target.value)}
+                    placeholder="Search song by title or category..."
+                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none"
+                  />
+                </div>
+
+                {/* Songs Checkbox List */}
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 pr-1">
+                  {availableSongs
+                    .filter((s) => {
+                      if (!songPickerSearch.trim()) return true;
+                      const q = songPickerSearch.toLowerCase();
+                      return s.title.toLowerCase().includes(q) || (s.titleTe && s.titleTe.includes(q));
+                    })
+                    .map((song) => {
+                      const currentService = formData.eventServices.find((s) => s.id === songPickerServiceId);
+                      const isSelected = currentService?.songs.some((x) => x.id === song.id);
+
+                      return (
+                        <div
+                          key={song.id}
+                          onClick={() => handleToggleSongInPicker(song)}
+                          className="py-2.5 px-3 flex items-center justify-between text-xs hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl cursor-pointer"
+                        >
+                          <div className="flex-1 min-w-0 pr-2">
+                            <div className="font-bold text-slate-900 dark:text-white truncate">
+                              {song.title}
+                            </div>
+                            {song.titleTe && (
+                              <div className="text-[10px] text-slate-500 font-serif truncate">
+                                {song.titleTe}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {song.key && (
+                              <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[9px] font-bold">
+                                {song.key}
+                              </span>
+                            )}
+                            <div
+                              className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
+                                isSelected
+                                  ? 'bg-emerald-600 border-emerald-600 text-white'
+                                  : 'border-slate-300 dark:border-slate-700'
+                              }`}
+                            >
+                              {isSelected && <Check size={12} strokeWidth={3} />}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+
+                {/* Done Button */}
+                <div className="pt-2 flex justify-end border-t border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setSongPickerServiceId(null)}
+                    className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold"
+                  >
+                    Done
+                  </button>
                 </div>
               </div>
             </div>
@@ -1765,83 +2382,193 @@ export default function AdminEventsPage() {
           )}
 
           {/* ========================================================= */}
-          {/* ATTENDANCE / ATTENDEE MODAL                                */}
+          {/* EVENT ATTENDEES SCREEN (Exact Mobile App EventAttendeesScreen) */}
           {/* ========================================================= */}
           {attendModalEvent && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl relative max-h-[85vh] overflow-y-auto">
-                <button
-                  type="button"
-                  onClick={() => setAttendModalEvent(null)}
-                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                >
-                  <X size={18} />
-                </button>
-
-                <div className="space-y-1">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Users size={18} className="text-emerald-500" />
-                    <span>Attendance Check-In</span>
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {attendModalEvent.title} &bull; {formatDisplayDate(attendModalEvent.startDate)}
-                  </p>
-                </div>
-
-                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-                  <span className="text-slate-500">Confirmed RSVPs (Going):</span>
-                  <span className="font-bold text-emerald-600 text-sm">
-                    {attendModalEvent.rsvpStats?.goingCount || 0} Members
-                  </span>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                    Recent RSVP Responders
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-in fade-in overflow-y-auto">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-7 space-y-5 shadow-2xl relative my-auto max-h-[90vh] flex flex-col">
+                {/* Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setAttendModalEvent(null)}
+                      className="p-2 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                    >
+                      <ArrowLeft size={18} />
+                    </button>
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 dark:text-white leading-tight">
+                        {attendModalEvent.title}
+                      </h3>
+                      <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+                        <Building2 size={12} className="text-slate-400" />
+                        <span>Rhema Church &bull; {formatDisplayDate(attendModalEvent.startDate)}</span>
+                        <span className="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 font-mono text-[10px]">
+                          RHEMA
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  {attendees.filter((a) => a.eventId === attendModalEvent.id).length === 0 ? (
-                    <div className="p-6 text-center text-xs text-slate-400 bg-slate-50/50 dark:bg-slate-950/40 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800">
-                      No RSVP responders yet. Members will appear here when they respond to the event poll.
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleExportAttendanceCSV}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 cursor-pointer"
+                      title="Export CSV"
+                    >
+                      <Download size={13} />
+                      <span className="hidden sm:inline">Export CSV</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setAttendModalEvent(null)}
+                      className="p-1.5 text-slate-400 hover:text-slate-600"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter Pills (All, Present, Absent matching mobile app) */}
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceFilter('All')}
+                    className={`py-2 rounded-xl text-xs font-bold text-center transition-all cursor-pointer ${
+                      attendanceFilter === 'All'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+                    }`}
+                  >
+                    All ({attendanceMembers.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceFilter('Present')}
+                    className={`py-2 rounded-xl text-xs font-bold text-center transition-all cursor-pointer ${
+                      attendanceFilter === 'Present'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 hover:bg-emerald-100'
+                    }`}
+                  >
+                    Present ({presentCount})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAttendanceFilter('Absent')}
+                    className={`py-2 rounded-xl text-xs font-bold text-center transition-all cursor-pointer ${
+                      attendanceFilter === 'Absent'
+                        ? 'bg-slate-700 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200'
+                    }`}
+                  >
+                    Absent ({absentCount})
+                  </button>
+                </div>
+
+                {/* Search Input */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={attendanceSearchQuery}
+                    onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                    placeholder="Search attendees by name or phone..."
+                    className="w-full pl-8 pr-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-xs focus:outline-none"
+                  />
+                </div>
+
+                {/* Attendees List */}
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/80 pr-1 max-h-[50vh]">
+                  {isAttendanceLoading ? (
+                    <div className="py-12 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                      <RefreshCw size={16} className="animate-spin text-emerald-500" />
+                      <span>Loading church member list...</span>
+                    </div>
+                  ) : filteredAttendanceList.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      No matching attendees found.
                     </div>
                   ) : (
-                    <div className="divide-y divide-slate-100 dark:divide-slate-800/80 max-h-60 overflow-y-auto">
-                      {attendees
-                        .filter((a) => a.eventId === attendModalEvent.id)
-                        .map((att) => (
-                          <div
-                            key={att.id}
-                            className="py-2.5 px-3 flex items-center justify-between text-xs hover:bg-slate-50 dark:hover:bg-slate-800/40 rounded-xl"
-                          >
-                            <div>
-                              <div className="font-semibold text-slate-900 dark:text-white">
-                                {att.memberName}
+                    filteredAttendanceList.map((member) => {
+                      const avatar = getAvatarColor(member.name);
+
+                      return (
+                        <div
+                          key={member.id}
+                          className="py-3 px-2 flex items-center justify-between text-xs hover:bg-slate-50/80 dark:hover:bg-slate-800/40 rounded-xl transition-colors"
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            {member.profilePicture ? (
+                              <img
+                                src={member.profilePicture}
+                                alt={member.name}
+                                className="w-10 h-10 rounded-full object-cover shrink-0"
+                              />
+                            ) : (
+                              <div
+                                className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${avatar.bg} ${avatar.text}`}
+                              >
+                                {getInitials(member.name)}
                               </div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                {att.memberPhone || 'No phone'}
+                            )}
+
+                            <div className="min-w-0 truncate">
+                              <div className="font-bold text-slate-900 dark:text-white truncate">
+                                {member.name}
+                              </div>
+                              <div className="text-[11px] text-slate-400 flex items-center gap-2">
+                                <span>{member.phone || 'No Phone'}</span>
+                                {member.status === 'Present' && member.timestamp && (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                    &bull; Checked in
+                                  </span>
+                                )}
                               </div>
                             </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
                             <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                                att.status === 'Going'
-                                  ? 'bg-emerald-500/10 text-emerald-500'
-                                  : 'bg-amber-500/10 text-amber-500'
+                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                member.status === 'Present'
+                                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                                  : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
                               }`}
                             >
-                              {att.status}
+                              {member.status}
                             </span>
+
+                            <button
+                              type="button"
+                              onClick={() => handleToggleAttendance(member)}
+                              className={`px-3 py-1 rounded-xl text-xs font-bold transition-colors cursor-pointer ${
+                                member.status === 'Present'
+                                  ? 'border border-slate-200 dark:border-slate-700 text-slate-600 hover:bg-slate-100'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                              }`}
+                            >
+                              {member.status === 'Present' ? 'Mark Absent' : 'Mark Present'}
+                            </button>
                           </div>
-                        ))}
-                    </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
 
-                <div className="pt-2 flex justify-end">
+                <div className="pt-2 flex justify-end border-t border-slate-100 dark:border-slate-800">
                   <button
                     type="button"
                     onClick={() => setAttendModalEvent(null)}
-                    className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    className="px-5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold"
                   >
-                    Close
+                    Done
                   </button>
                 </div>
               </div>
