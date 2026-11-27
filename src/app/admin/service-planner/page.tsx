@@ -360,9 +360,114 @@ const getServiceTypeBadge = (typeStr: string) => {
   return 'SUNDAY WORSHIP';
 };
 
+
+// ─── Mobile-Aligned Supplementary Datasets for Service Roster ───
+export interface MinistryTeamItem {
+  id: string;
+  name: string;
+  description: string;
+  leaderName: string;
+  totalMembers: number;
+  activeRosterCount: number;
+  color: string;
+}
+
+const MINISTRY_TEAMS_DATA: MinistryTeamItem[] = [
+  { id: 'team-1', name: 'Worship Choir & Band', description: 'Vocalists, instrumentalists, choir directors, acoustic/electric band', leaderName: 'Brother Daniel Sundaram', totalMembers: 18, activeRosterCount: 8, color: 'bg-emerald-500' },
+  { id: 'team-2', name: 'Media Audio/Visual (A/V)', description: 'Live streaming broadcast, sound engineer, PTZ cameras, lyrics projection', leaderName: 'Brother Luke Media', totalMembers: 12, activeRosterCount: 5, color: 'bg-blue-500' },
+  { id: 'team-3', name: 'Ushering & Hospitality', description: 'Sanctuary seating, crowd flow, offering collection, guest greeting', leaderName: 'David K. Joseph', totalMembers: 24, activeRosterCount: 12, color: 'bg-amber-500' },
+  { id: 'team-4', name: "Children's & Teens Ministry", description: 'Sunday School teachers, child safety guardians, teen mentors', leaderName: 'Hannah Grace', totalMembers: 15, activeRosterCount: 8, color: 'bg-purple-500' },
+  { id: 'team-5', name: 'Intercessory Prayer Team', description: 'Pre-service prayer vigil, altar ministry, urgent hospital intercession', leaderName: 'Sarah Thomas', totalMembers: 20, activeRosterCount: 6, color: 'bg-rose-500' },
+  { id: 'team-6', name: 'Welcome Desk & Guest Care', description: 'First-time visitors welcome pack, follow-up hospitality lounge', leaderName: 'Priya Sundaram', totalMembers: 10, activeRosterCount: 4, color: 'bg-teal-500' },
+];
+
+export interface MemberSkillRecord {
+  id: string;
+  memberName: string;
+  department: string;
+  primarySkill: string;
+  proficiency: 'Expert' | 'Intermediate' | 'Certified';
+  status: 'Verified' | 'Pending Verification';
+}
+
+const MEMBER_SKILLS_DATA: MemberSkillRecord[] = [
+  { id: 'SKILL-01', memberName: 'Jonathan Samuel', department: 'Media Audio/Visual', primarySkill: 'Digital Mixing Console (Behringer X32)', proficiency: 'Expert', status: 'Verified' },
+  { id: 'SKILL-02', memberName: 'Sister Grace Thomas', department: 'Worship Band', primarySkill: 'Keys 1 (Acoustic Grand / Synth Pad)', proficiency: 'Expert', status: 'Verified' },
+  { id: 'SKILL-03', memberName: 'Brother Joshua Rao', department: 'Worship Band', primarySkill: 'Drums & Acoustic Cages', proficiency: 'Expert', status: 'Verified' },
+  { id: 'SKILL-04', memberName: 'Brother Caleb Paul', department: 'Worship Band', primarySkill: '5-String Bass Guitar & Rhythm', proficiency: 'Intermediate', status: 'Verified' },
+  { id: 'SKILL-05', memberName: 'David K. Joseph', department: 'Ushering & Hospitality', primarySkill: 'Crowd Protocol & Sanctuary Flow', proficiency: 'Certified', status: 'Verified' },
+  { id: 'SKILL-06', memberName: 'Hannah Grace', department: "Children's Ministry", primarySkill: 'Child Evangelism & Storytelling', proficiency: 'Expert', status: 'Verified' },
+  { id: 'SKILL-07', memberName: 'Caleb Joshua', department: 'Ushering', primarySkill: 'Fire Safety & First Aid Responder', proficiency: 'Certified', status: 'Verified' },
+  { id: 'SKILL-08', memberName: 'Priya Sundaram', department: 'Welcome Desk', primarySkill: 'New Member Orientation & Care', proficiency: 'Intermediate', status: 'Verified' },
+];
+
+export interface ServiceTemplateItem {
+  id: string;
+  name: string;
+  serviceType: string;
+  defaultDurationMinutes: number;
+  description: string;
+  isBuiltIn: boolean;
+  cuesCount: number;
+  runSheetTemplate: { program: string; durationMinutes: number }[];
+}
+
+const SERVICE_TEMPLATES_DATA: ServiceTemplateItem[] = [
+  {
+    id: 'standard',
+    name: 'Standard Sunday Worship',
+    serviceType: '08:30 AM (1st Service)',
+    defaultDurationMinutes: 105,
+    description: 'Full liturgical flow with pre-service prayer, 30m high praise, sermon, communion, and altar call.',
+    isBuiltIn: true,
+    cuesCount: 6,
+    runSheetTemplate: [
+      { program: 'Pre-Service Prayer & Welcome', durationMinutes: 5 },
+      { program: 'Praise & Worship Extravaganza', durationMinutes: 30 },
+      { program: 'Holy Communion & Offering', durationMinutes: 10 },
+      { program: 'Announcements & Welcome', durationMinutes: 10 },
+      { program: 'Ministry of the Word', durationMinutes: 45 },
+      { program: 'Altar Call & Benediction', durationMinutes: 10 },
+    ],
+  },
+  {
+    id: 'communion',
+    name: 'Communion Sunday Celebration',
+    serviceType: '11:00 AM (2nd Service)',
+    defaultDurationMinutes: 120,
+    description: 'Special first-Sunday holy communion ordinance with extended worship and covenant dedication.',
+    isBuiltIn: true,
+    cuesCount: 7,
+    runSheetTemplate: [
+      { program: 'Opening Hymn & Sanctuary Invocation', durationMinutes: 8 },
+      { program: 'Bilingual Praise & Thanksgiving', durationMinutes: 35 },
+      { program: 'Testimonies & Thanksgiving Offering', durationMinutes: 12 },
+      { program: 'Holy Communion Solemn Ordinance', durationMinutes: 20 },
+      { program: 'Ministry of the Word', durationMinutes: 35 },
+      { program: 'Prayer of Covenant Blessing', durationMinutes: 10 },
+    ],
+  },
+  {
+    id: 'youth',
+    name: 'Youth Celebration & Word',
+    serviceType: '05:00 PM (Youth Service)',
+    defaultDurationMinutes: 90,
+    description: 'High energy contemporary worship, youth choir, icebreaker, short message and prayer circle.',
+    isBuiltIn: true,
+    cuesCount: 5,
+    runSheetTemplate: [
+      { program: 'Icebreaker & Praise Warmup', durationMinutes: 10 },
+      { program: 'Contemporary High Praise Band', durationMinutes: 30 },
+      { program: 'Youth Spotlight & Community News', durationMinutes: 10 },
+      { program: 'Youth Dynamic Word & Challenge', durationMinutes: 30 },
+      { program: 'Altar Worship & Circle Prayer', durationMinutes: 10 },
+    ],
+  },
+];
+
 export default function AdminServicePlannerPage() {
   // Navigation Tabs matching mobile Service Roster
-  const [activeTab, setActiveTab] = useState<'overview' | 'runsheet' | 'band-setlist' | 'volunteers' | 'attendance' | 'analytics'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'runsheet' | 'band-setlist' | 'volunteers' | 'teams' | 'skills' | 'templates' | 'attendance' | 'analytics'>('overview');
   const [serviceSearch, setServiceSearch] = useState('');
   const [serviceStatusFilter, setServiceStatusFilter] = useState<'ALL' | 'DRAFT' | 'PUBLISHED' | 'COMPLETED'>('ALL');
 
@@ -378,6 +483,16 @@ export default function AdminServicePlannerPage() {
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
   const [isLiveStageHudOpen, setIsLiveStageHudOpen] = useState(false);
   const [activeHudCueIndex, setActiveHudCueIndex] = useState(1); // Cue 2 active by default
+
+  // Extended Mobile Form States (4 Cards: Basic Info, Date & Schedule, Location & Sermon, Recurrence & Template)
+  const [createRecurrence, setCreateRecurrence] = useState<'one_time' | 'weekly' | 'biweekly' | 'monthly'>('one_time');
+  const [createOccurrencesCount, setCreateOccurrencesCount] = useState<number>(4);
+  const [selectedTemplateForNew, setSelectedTemplateForNew] = useState<string>('standard');
+  const [serviceLocation, setServiceLocation] = useState<string>('Main Church Sanctuary');
+  const [sermonTheme, setSermonTheme] = useState<string>('Covenant of Supernatural Peace');
+  const [bibleScripture, setBibleScripture] = useState<string>('Romans 8:1-4, Psalm 23');
+  const [serviceStartTime, setServiceStartTime] = useState<string>('10:00 AM');
+  const [serviceEndTime, setServiceEndTime] = useState<string>('12:30 PM');
 
   // Plan Form State (Create & Edit)
   const [planFormData, setPlanFormData] = useState<{
@@ -1163,7 +1278,7 @@ export default function AdminServicePlannerPage() {
             </div>
           )}
 
-          {/* ─── Navigation Tabs (Services, Order Builder, Setlist, Assignments, Attendance, Analytics) ─── */}
+          {/* ─── Navigation Tabs (Exact Mobile Structure: Services, Order Builder, Setlist, Assignments, Ministry Teams, Verified Skills, Templates, Attendance, Analytics) ─── */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
             <button
               type="button"
@@ -1215,6 +1330,45 @@ export default function AdminServicePlannerPage() {
             >
               <ListOrdered size={14} />
               <span>Assignments ({activePlan?.volunteerDuties?.length || 0})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('teams')}
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
+                activeTab === 'teams'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Users size={14} />
+              <span>Ministry Teams ({MINISTRY_TEAMS_DATA.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('skills')}
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
+                activeTab === 'skills'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Sparkles size={14} />
+              <span>Verified Skills ({MEMBER_SKILLS_DATA.length})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('templates')}
+              className={`px-4 py-2 rounded-full text-xs font-bold flex items-center gap-2 shrink-0 transition-all ${
+                activeTab === 'templates'
+                  ? 'bg-slate-950 dark:bg-white text-white dark:text-slate-950 shadow-sm'
+                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <FileText size={14} />
+              <span>Templates ({SERVICE_TEMPLATES_DATA.length})</span>
             </button>
 
             <button
@@ -1281,6 +1435,164 @@ export default function AdminServicePlannerPage() {
           {/* ========================================================================= */}
           {/* TAB 1: SERVICES LIST (Matching Image 1 mobile screen)                      */}
           {/* ========================================================================= */}
+          
+          {/* ========================================================================= */}
+          {/* TAB: MINISTRY TEAMS (Exact Mobile Matching)                               */}
+          {/* ========================================================================= */}
+          {activeTab === 'teams' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white font-serif">Ministry Teams Directory</h3>
+                  <p className="text-xs text-slate-500">Connected to M39 Volunteer Management and M43 Job Circle</p>
+                </div>
+                <span className="text-xs font-bold px-3 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 rounded-full">
+                  {MINISTRY_TEAMS_DATA.length} Active Teams
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {MINISTRY_TEAMS_DATA.map((team) => (
+                  <div key={team.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-3 hover:border-slate-300 dark:hover:border-slate-700 transition-all">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-3.5 h-3.5 rounded-full ${team.color}`} />
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">{team.name}</h4>
+                      </div>
+                      <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                        {team.activeRosterCount} on duty
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">{team.description}</p>
+                    <div className="pt-2 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+                      <span>Lead: <strong className="text-slate-900 dark:text-white">{team.leaderName}</strong></span>
+                      <span>{team.totalMembers} Volunteers</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TAB: VERIFIED SKILLS (Exact Mobile Matching)                              */}
+          {/* ========================================================================= */}
+          {activeTab === 'skills' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white font-serif">Verified Skills Registry</h3>
+                  <p className="text-xs text-slate-500">Qualifications &amp; competencies verified for Sunday worship service slots</p>
+                </div>
+                <span className="text-xs font-bold px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 rounded-full">
+                  {MEMBER_SKILLS_DATA.length} Verified
+                </span>
+              </div>
+
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-200 dark:border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">Member Name</th>
+                        <th className="py-3 px-4">Ministry Team</th>
+                        <th className="py-3 px-4">Verified Competency</th>
+                        <th className="py-3 px-4">Proficiency</th>
+                        <th className="py-3 px-4 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-700 dark:text-slate-300 font-medium">
+                      {MEMBER_SKILLS_DATA.map((row) => (
+                        <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                          <td className="py-3 px-4 font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                              {row.memberName.charAt(0)}
+                            </div>
+                            <span>{row.memberName}</span>
+                          </td>
+                          <td className="py-3 px-4">{row.department}</td>
+                          <td className="py-3 px-4 text-slate-900 dark:text-white font-semibold">{row.primarySkill}</td>
+                          <td className="py-3 px-4">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                              {row.proficiency}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 flex items-center gap-1 inline-flex">
+                              <CheckCircle2 size={12} />
+                              <span>{row.status}</span>
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* TAB: TEMPLATES (Exact Mobile Matching)                                    */}
+          {/* ========================================================================= */}
+          {activeTab === 'templates' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white font-serif">Order of Service Templates</h3>
+                  <p className="text-xs text-slate-500">Pre-built worship orders for fast weekly liturgy drafting</p>
+                </div>
+                <span className="text-xs font-bold px-3 py-1 bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 rounded-full">
+                  {SERVICE_TEMPLATES_DATA.length} Ready Templates
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {SERVICE_TEMPLATES_DATA.map((tpl) => (
+                  <div key={tpl.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm space-y-4 hover:border-slate-300 dark:hover:border-slate-700 transition-all flex flex-col justify-between">
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                          {tpl.serviceType}
+                        </span>
+                        {tpl.isBuiltIn && (
+                          <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400">BUILT-IN</span>
+                        )}
+                      </div>
+                      <h4 className="font-bold text-base text-slate-900 dark:text-white">{tpl.name}</h4>
+                      <p className="text-xs text-slate-500 leading-relaxed">{tpl.description}</p>
+                      <div className="text-xs font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 pt-1">
+                        <Clock size={13} />
+                        <span>Duration: ~{tpl.defaultDurationMinutes} mins · {tpl.cuesCount} Segments</span>
+                      </div>
+
+                      <div className="pt-2 space-y-1">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Program Flow</span>
+                        {tpl.runSheetTemplate.map((item, idx) => (
+                          <div key={idx} className="text-xs text-slate-600 dark:text-slate-400 flex items-center justify-between">
+                            <span>{idx + 1}. {item.program}</span>
+                            <span className="text-slate-400 text-[11px] font-mono">{item.durationMinutes}m</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        showToast(`Applied "${tpl.name}" template to active service!`);
+                      }}
+                      className="w-full py-2 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 font-bold text-xs hover:bg-slate-800 dark:hover:bg-slate-100 transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Copy size={13} />
+                      <span>Apply to Current Service</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'overview' && (
             <div className="space-y-4">
               {/* Search Bar */}
@@ -1938,45 +2250,99 @@ export default function AdminServicePlannerPage() {
           {/* MODALS & SIMULATORS                                                       */}
           {/* ========================================================================= */}
 
-          {/* Create Service Plan Modal */}
+          {/* Create Service Plan Modal (Exact Mobile 4-Card Structure) */}
           {isCreatePlanOpen && (
-            <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-[#0B192C] border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Calendar size={18} className="text-emerald-400" />
-                    <h3 className="font-bold text-white text-sm">Create New Service Plan</h3>
+            <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl max-w-2xl w-full p-6 shadow-2xl max-h-[92vh] overflow-y-auto space-y-5 text-slate-900 dark:text-white">
+                {/* Modal Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-900 dark:text-white font-bold">
+                      <CalendarDays size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-base text-slate-900 dark:text-white font-serif">
+                        Create Worship Service
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        All-in-one service schedule, run sheet &amp; volunteer roster
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={() => setIsCreatePlanOpen(false)}
-                    className="p-1 text-slate-400 hover:text-white"
+                    className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
                   >
-                    <X size={18} />
+                    <X size={16} />
                   </button>
                 </div>
 
-                <form onSubmit={handleSaveCreatePlan} className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Service Title *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={planFormData.serviceTitle}
-                      onChange={(e) => setPlanFormData({ ...planFormData, serviceTitle: e.target.value })}
-                      placeholder="e.g. Sunday Celebration &amp; Praise Service"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                    />
-                    {planFormErrors.serviceTitle && (
-                      <p className="text-red-400 text-[10px] mt-1">{planFormErrors.serviceTitle}</p>
-                    )}
+                <form onSubmit={handleSaveCreatePlan} className="space-y-4 text-xs">
+                  {/* CARD 1: BASIC INFORMATION */}
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider text-[11px] pb-2 border-b border-slate-200 dark:border-slate-700/60">
+                      <Sparkles size={14} />
+                      <span>CARD 1: BASIC INFORMATION</span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                        Service Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={planFormData.serviceTitle}
+                        onChange={(e) => setPlanFormData({ ...planFormData, serviceTitle: e.target.value })}
+                        placeholder="e.g. Sunday Morning Worship"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-slate-950 dark:focus:border-white"
+                      />
+                      {planFormErrors.serviceTitle && (
+                        <p className="text-red-500 text-[10px] mt-1">{planFormErrors.serviceTitle}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+                        Service Type
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { val: '08:30 AM (1st Service)', label: 'SUNDAY WORSHIP' },
+                          { val: '11:00 AM (2nd Service)', label: 'SUNDAY CELEBRATION' },
+                          { val: '05:00 PM (Youth Service)', label: 'YOUTH SERVICE' },
+                          { val: '07:00 PM (Mid-Week Prayer)', label: 'HOLY COMMUNION' },
+                        ].map((st) => {
+                          const isSel = planFormData.serviceType === st.val;
+                          return (
+                            <button
+                              key={st.val}
+                              type="button"
+                              onClick={() => setPlanFormData({ ...planFormData, serviceType: st.val as SundayServiceSlot })}
+                              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all ${
+                                isSel
+                                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 shadow-sm'
+                                  : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                              }`}
+                            >
+                              {st.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  {/* CARD 2: DATE & SCHEDULE */}
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider text-[11px] pb-2 border-b border-slate-200 dark:border-slate-700/60">
+                      <Calendar size={14} />
+                      <span>CARD 2: DATE &amp; SCHEDULE</span>
+                    </div>
+
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
                         Service Date *
                       </label>
                       <input
@@ -1984,48 +2350,104 @@ export default function AdminServicePlannerPage() {
                         required
                         value={planFormData.serviceDate}
                         onChange={(e) => setPlanFormData({ ...planFormData, serviceDate: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
                       />
-                      {planFormErrors.serviceDate && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.serviceDate}</p>
-                      )}
                     </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Service Slot (M34) *
-                      </label>
-                      <select
-                        value={planFormData.serviceType}
-                        onChange={(e) => setPlanFormData({ ...planFormData, serviceType: e.target.value as SundayServiceSlot })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="08:30 AM (1st Service)">08:30 AM (1st Service)</option>
-                        <option value="11:00 AM (2nd Service)">11:00 AM (2nd Service)</option>
-                        <option value="05:00 PM (Youth Service)">05:00 PM (Youth Service)</option>
-                        <option value="07:00 PM (Mid-Week Prayer)">07:00 PM (Mid-Week Prayer)</option>
-                      </select>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                          Start Time * (12-hour format)
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={serviceStartTime}
+                          onChange={(e) => setServiceStartTime(e.target.value)}
+                          placeholder="10:00 AM"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                          End Time * (12-hour format)
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={serviceEndTime}
+                          onChange={(e) => setServiceEndTime(e.target.value)}
+                          placeholder="12:30 PM"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                      </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Lead Pastor *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={planFormData.leadPastor}
-                        onChange={(e) => setPlanFormData({ ...planFormData, leadPastor: e.target.value })}
-                        placeholder="e.g. Senior Pastor John Mark"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      />
-                      {planFormErrors.leadPastor && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.leadPastor}</p>
-                      )}
+                  {/* CARD 3: LOCATION & SERMON DETAILS */}
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider text-[11px] pb-2 border-b border-slate-200 dark:border-slate-700/60">
+                      <MapPin size={14} />
+                      <span>CARD 3: LOCATION &amp; SERMON DETAILS</span>
                     </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                          Service Location
+                        </label>
+                        <input
+                          type="text"
+                          value={serviceLocation}
+                          onChange={(e) => setServiceLocation(e.target.value)}
+                          placeholder="e.g. Main Church Sanctuary / Hall"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                          Preacher / Speaker *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={planFormData.leadPastor}
+                          onChange={(e) => setPlanFormData({ ...planFormData, leadPastor: e.target.value })}
+                          placeholder="e.g. Senior Pastor John Mark"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                          Sermon Theme
+                        </label>
+                        <input
+                          type="text"
+                          value={sermonTheme}
+                          onChange={(e) => setSermonTheme(e.target.value)}
+                          placeholder="e.g. Covenant of Supernatural Peace"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
+                          Bible Scripture
+                        </label>
+                        <input
+                          type="text"
+                          value={bibleScripture}
+                          onChange={(e) => setBibleScripture(e.target.value)}
+                          placeholder="e.g. Romans 8:1-4, Psalm 23"
+                          className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1">
                         Worship Leader *
                       </label>
                       <input
@@ -2034,227 +2456,131 @@ export default function AdminServicePlannerPage() {
                         value={planFormData.worshipLeader}
                         onChange={(e) => setPlanFormData({ ...planFormData, worshipLeader: e.target.value })}
                         placeholder="e.g. Brother Daniel Sundaram"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-medium focus:outline-none"
                       />
-                      {planFormErrors.worshipLeader && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.worshipLeader}</p>
-                      )}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Estimated Duration (Mins) *
-                      </label>
-                      <input
-                        type="number"
-                        min="15"
-                        max="300"
-                        required
-                        value={planFormData.estimatedDurationMinutes}
-                        onChange={(e) => setPlanFormData({ ...planFormData, estimatedDurationMinutes: Number(e.target.value) })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      />
-                      {planFormErrors.estimatedDurationMinutes && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.estimatedDurationMinutes}</p>
-                      )}
+                  {/* CARD 4: RECURRENCE & ORDER TEMPLATE */}
+                  <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700/60 space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold uppercase tracking-wider text-[11px] pb-2 border-b border-slate-200 dark:border-slate-700/60">
+                      <RotateCcw size={14} />
+                      <span>CARD 4: RECURRENCE &amp; ORDER TEMPLATE</span>
                     </div>
+
                     <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Service Status
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+                        Service Recurrence
                       </label>
-                      <select
-                        value={planFormData.status}
-                        onChange={(e) => setPlanFormData({ ...planFormData, status: e.target.value as ServicePlanStatus })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="Draft (Sim)">Draft (Sim)</option>
-                        <option value="Confirmed (Sim)">Confirmed (Sim)</option>
-                        <option value="Archived (Sim)">Archived (Sim)</option>
-                      </select>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {[
+                          { id: 'one_time', label: 'One-Time', sub: 'Single service' },
+                          { id: 'weekly', label: 'Weekly', sub: 'Every Sunday' },
+                          { id: 'biweekly', label: 'Bi-Weekly', sub: 'Every 2 wks' },
+                          { id: 'monthly', label: 'Monthly', sub: 'Monthly' },
+                        ].map((r) => {
+                          const isSel = createRecurrence === r.id;
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => setCreateRecurrence(r.id as any)}
+                              className={`p-2.5 rounded-xl text-left border transition-all ${
+                                isSel
+                                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 border-slate-950 dark:border-white shadow-sm'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <div className="font-bold text-xs">{r.label}</div>
+                              <div className={`text-[10px] ${isSel ? 'text-slate-300 dark:text-slate-600' : 'text-slate-400'}`}>
+                                {r.sub}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {createRecurrence !== 'one_time' && (
+                      <div className="space-y-2 pt-1">
+                        <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                          Occurrences Count
+                        </label>
+                        <div className="flex items-center gap-2">
+                          {[2, 4, 8, 12].map((cnt) => (
+                            <button
+                              key={cnt}
+                              type="button"
+                              onClick={() => setCreateOccurrencesCount(cnt)}
+                              className={`px-3 py-1 rounded-xl text-xs font-bold border transition-all ${
+                                createOccurrencesCount === cnt
+                                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 border-slate-950 dark:border-white'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              {cnt} Services
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Live Preview Card of Recurring Dates */}
+                        <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 text-xs">
+                          <span className="font-bold text-emerald-800 dark:text-emerald-300 block mb-1">
+                            {createOccurrencesCount} Service Dates will be scheduled ({createRecurrence.toUpperCase()})
+                          </span>
+                          <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                            Auto-generating recurring roster dates starting from {planFormData.serviceDate}.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-200 mb-1.5">
+                        Order of Service Template
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {[
+                          { id: 'standard', name: 'Standard Sunday (6 Segments)' },
+                          { id: 'communion', name: 'Communion Sunday (6 Segments)' },
+                          { id: 'youth', name: 'Youth Celebration (5 Segments)' },
+                          { id: 'blank', name: 'Blank Template (Custom Flow)' },
+                        ].map((tpl) => {
+                          const isSel = selectedTemplateForNew === tpl.id;
+                          return (
+                            <button
+                              key={tpl.id}
+                              type="button"
+                              onClick={() => setSelectedTemplateForNew(tpl.id)}
+                              className={`px-3 py-2 rounded-xl text-left border font-semibold text-xs flex items-center justify-between transition-all ${
+                                isSel
+                                  ? 'bg-slate-950 text-white dark:bg-white dark:text-slate-950 border-slate-950 dark:border-white shadow-sm'
+                                  : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'
+                              }`}
+                            >
+                              <span>{tpl.name}</span>
+                              {isSel && <CheckCircle2 size={14} />}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+                  {/* Actions */}
+                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={() => setIsCreatePlanOpen(false)}
-                      className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold"
+                      className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-all"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-xl bg-[#1E6F43] hover:bg-[#185835] text-white text-xs font-semibold shadow-md shadow-emerald-950/40"
+                      className="px-5 py-2 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 text-xs font-bold hover:bg-slate-800 dark:hover:bg-slate-200 transition-all shadow-sm"
                     >
-                      Create Service Plan (Simulated)
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Edit Service Plan Metadata Modal */}
-          {isEditPlanOpen && (
-            <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-              <div className="bg-[#0B192C] border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div className="flex items-center gap-2">
-                    <Edit3 size={18} className="text-amber-400" />
-                    <h3 className="font-bold text-white text-sm">
-                      Edit Service Plan Metadata ({editingPlanTargetId || activePlan?.id})
-                    </h3>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditPlanOpen(false);
-                      setEditingPlanTargetId(null);
-                    }}
-                    className="p-1 text-slate-400 hover:text-white"
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                <form onSubmit={handleSaveEditPlan} className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                      Service Title *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={planFormData.serviceTitle}
-                      onChange={(e) => setPlanFormData({ ...planFormData, serviceTitle: e.target.value })}
-                      placeholder="e.g. Sunday Celebration &amp; Praise Service"
-                      className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                    />
-                    {planFormErrors.serviceTitle && (
-                      <p className="text-red-400 text-[10px] mt-1">{planFormErrors.serviceTitle}</p>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Service Date *
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        value={planFormData.serviceDate}
-                        onChange={(e) => setPlanFormData({ ...planFormData, serviceDate: e.target.value })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      />
-                      {planFormErrors.serviceDate && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.serviceDate}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Service Slot (M34) *
-                      </label>
-                      <select
-                        value={planFormData.serviceType}
-                        onChange={(e) => setPlanFormData({ ...planFormData, serviceType: e.target.value as SundayServiceSlot })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="08:30 AM (1st Service)">08:30 AM (1st Service)</option>
-                        <option value="11:00 AM (2nd Service)">11:00 AM (2nd Service)</option>
-                        <option value="05:00 PM (Youth Service)">05:00 PM (Youth Service)</option>
-                        <option value="07:00 PM (Mid-Week Prayer)">07:00 PM (Mid-Week Prayer)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Lead Pastor *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={planFormData.leadPastor}
-                        onChange={(e) => setPlanFormData({ ...planFormData, leadPastor: e.target.value })}
-                        placeholder="e.g. Senior Pastor John Mark"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      />
-                      {planFormErrors.leadPastor && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.leadPastor}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Worship Leader *
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        value={planFormData.worshipLeader}
-                        onChange={(e) => setPlanFormData({ ...planFormData, worshipLeader: e.target.value })}
-                        placeholder="e.g. Brother Daniel Sundaram"
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      />
-                      {planFormErrors.worshipLeader && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.worshipLeader}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Estimated Duration (Mins) *
-                      </label>
-                      <input
-                        type="number"
-                        min="15"
-                        max="300"
-                        required
-                        value={planFormData.estimatedDurationMinutes}
-                        onChange={(e) => setPlanFormData({ ...planFormData, estimatedDurationMinutes: Number(e.target.value) })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      />
-                      {planFormErrors.estimatedDurationMinutes && (
-                        <p className="text-red-400 text-[10px] mt-1">{planFormErrors.estimatedDurationMinutes}</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                        Service Status
-                      </label>
-                      <select
-                        value={planFormData.status}
-                        onChange={(e) => setPlanFormData({ ...planFormData, status: e.target.value as ServicePlanStatus })}
-                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white focus:outline-none focus:border-emerald-500"
-                      >
-                        <option value="Draft (Sim)">Draft (Sim)</option>
-                        <option value="Confirmed (Sim)">Confirmed (Sim)</option>
-                        <option value="Archived (Sim)">Archived (Sim)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsEditPlanOpen(false);
-                        setEditingPlanTargetId(null);
-                      }}
-                      className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 text-xs font-semibold"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-md shadow-amber-950/40"
-                    >
-                      Save Changes (Simulated)
+                      Publish Worship Service
                     </button>
                   </div>
                 </form>

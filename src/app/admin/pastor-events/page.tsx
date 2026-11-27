@@ -373,13 +373,18 @@ export default function AdminPastorEventsPage() {
     },
   ]);
 
-  // Form State for Create & Edit
+  // Form State for Create & Edit (Mobile Step-by-Step Aligned)
+  const [modalStep, setModalStep] = useState<number>(1);
   const [formData, setFormData] = useState({
     title: '',
     appointmentType: 'Home Blessing & Prayer' as PastorAppointmentType,
     date: '2026-11-24',
     startTime: '11:30 AM',
     endTime: '12:45 PM',
+    venue: '',
+    city: '',
+    address: '',
+    description: '',
     memberOrFamilyName: '',
     memberId: 'RHEMA-2026-M001',
     m35EscalatedPrayerId: '',
@@ -814,12 +819,17 @@ export default function AdminPastorEventsPage() {
   // =========================================================================
 
   const openCreateModal = () => {
+    setModalStep(1);
     setFormData({
       title: '',
       appointmentType: 'Home Blessing & Prayer',
-      date: selectedDate,
+      date: selectedDate || '2026-11-24',
       startTime: '11:30 AM',
       endTime: '12:45 PM',
+      venue: 'Calvary Temple Sanctuary',
+      city: 'Guntur',
+      address: 'Ring Road, Arundelpet, Guntur, AP, 522002',
+      description: 'Pastoral family blessing and home dedication service.',
       memberOrFamilyName: 'Brother David K. Joseph (Demo)',
       memberId: 'RHEMA-2026-M001',
       m35EscalatedPrayerId: '',
@@ -829,11 +839,11 @@ export default function AdminPastorEventsPage() {
       onlineMeetingId: '',
       adminEventId: '',
       maskedPhone: '+91 98450-XXXX1',
-      destinationAddress: 'Prestige Palms, Whitefield Main Road',
+      destinationAddress: 'Calvary Temple Sanctuary — Guntur — Ring Road, Arundelpet, Guntur, AP, 522002',
       zone: 'Whitefield Zone',
       priorityLevel: 'Normal',
       transitMode: 'Car',
-      pastoralNotes: 'Pastoral family blessing and house dedication prayer.',
+      pastoralNotes: 'Bring holy anointing oil and communion elements.',
       anointingOilRequired: true,
       communionRequired: false,
     });
@@ -842,13 +852,25 @@ export default function AdminPastorEventsPage() {
   };
 
   const openEditModal = (item: M42PastorAppointment) => {
+    setModalStep(1);
     setEditingTargetId(item.id);
+    
+    // Parse venue, city, address
+    const parts = (item.destinationAddress || '').split(' — ').map(p => p.trim());
+    const vName = parts[0] || item.destinationAddress || '';
+    const cName = parts[1] || 'Guntur';
+    const aName = parts.length > 2 ? parts.slice(2).join(' — ') : (parts[1] || item.destinationAddress || '');
+
     setFormData({
       title: item.title,
       appointmentType: item.appointmentType,
       date: item.date,
       startTime: item.startTime,
       endTime: item.endTime,
+      venue: vName,
+      city: cName,
+      address: aName,
+      description: item.pastoralNotes || '',
       memberOrFamilyName: item.memberOrFamilyName,
       memberId: item.memberId || '',
       m35EscalatedPrayerId: item.m35EscalatedPrayerId || '',
@@ -870,14 +892,19 @@ export default function AdminPastorEventsPage() {
     setIsEditModalOpen(true);
   };
 
-  const validateForm = () => {
+  const validateForm = (targetStep?: number) => {
     const errs: Record<string, string> = {};
-    if (!formData.title.trim()) errs.title = 'Title is required';
-    if (!formData.date.trim()) errs.date = 'Date is required';
-    if (!formData.startTime.trim()) errs.startTime = 'Start time is required';
-    if (!formData.endTime.trim()) errs.endTime = 'End time is required';
-    if (!formData.memberOrFamilyName.trim()) errs.memberOrFamilyName = 'Member or family name is required';
-    if (!formData.destinationAddress.trim()) errs.destinationAddress = 'Address is required';
+    if (!formData.title.trim()) errs.title = 'Please enter an event title.';
+    if (!formData.date.trim()) errs.date = 'Date is required.';
+    if (!formData.startTime.trim()) errs.startTime = 'Start Time is required.';
+    if (!formData.endTime.trim()) errs.endTime = 'End Time is required.';
+
+    if (targetStep === undefined || targetStep >= 2) {
+      if (!formData.venue.trim()) errs.venue = 'Please enter a venue name.';
+      if (!formData.city.trim()) errs.city = 'Please enter a Town / Village.';
+      if (!formData.address.trim() && !formData.destinationAddress.trim()) errs.address = 'Please enter full address for maps integration.';
+    }
+
     setFormErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -907,7 +934,7 @@ export default function AdminPastorEventsPage() {
       onlineMeetingId: formData.onlineMeetingId || undefined,
       adminEventId: formData.adminEventId || undefined,
       maskedPhone: formData.maskedPhone,
-      destinationAddress: formData.destinationAddress.trim(),
+      destinationAddress: [formData.venue.trim(), formData.city.trim(), formData.address.trim()].filter(Boolean).join(' — ') || formData.destinationAddress.trim(),
       zone: formData.zone,
       priorityLevel: formData.priorityLevel,
       hasScheduleConflict: false,
@@ -952,7 +979,7 @@ export default function AdminPastorEventsPage() {
           onlineMeetingId: formData.onlineMeetingId || undefined,
           adminEventId: formData.adminEventId || undefined,
           maskedPhone: formData.maskedPhone,
-          destinationAddress: formData.destinationAddress.trim(),
+          destinationAddress: [formData.venue.trim(), formData.city.trim(), formData.address.trim()].filter(Boolean).join(' — ') || formData.destinationAddress.trim(),
           zone: formData.zone,
           priorityLevel: formData.priorityLevel,
           transitMode: formData.transitMode,
@@ -1321,7 +1348,7 @@ export default function AdminPastorEventsPage() {
                   </button>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {mobileDisplayedAppointments.map((item, index) => {
                     const leg = evaluatedRouteLegs[index];
                     return (
